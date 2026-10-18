@@ -1,0 +1,10 @@
+export { AuthenticationService, authService } from '@/services/auth';
+export { AssetService, assetsService } from '@/services/assets';
+export { AuditService, auditService } from '@/services/audit';
+export { VersionService } from '@/services/version';
+export { ReportService, reportsService } from '@/services/reports';
+export { SettingsService, settingsService } from '@/services/settings';
+export { AnalyticsService, analyticsService } from '@/services/analytics';
+export { dashboardService } from '@/services/dashboard';
+export { integrationService } from '@/services/integration.service';
+export { httpClient, HttpClientError } from '@/services/http-client';
