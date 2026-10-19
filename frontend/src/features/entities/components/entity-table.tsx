@@ -147,10 +147,11 @@ export function ProtectedAssetsTable() {
   const filteredAssets = useMemo(() => {
     return entities
       .filter((asset) => {
+        const ownerName = asset.owner?.name?.toLowerCase() ?? '';
         const matchesSearch =
-          asset.displayName.toLowerCase().includes(search.toLowerCase()) ||
-          asset.id.toLowerCase().includes(search.toLowerCase()) ||
-          asset.owner.name.toLowerCase().includes(search.toLowerCase());
+          asset.displayName?.toLowerCase().includes(search.toLowerCase()) ||
+          asset.id?.toLowerCase().includes(search.toLowerCase()) ||
+          ownerName.includes(search.toLowerCase());
         const matchesDept = deptFilter === 'all' || asset.department === deptFilter;
         const matchesStatus = statusFilter === 'all' || asset.status === statusFilter;
         const matchesRisk = riskFilter === 'all' || asset.risk === riskFilter;
@@ -225,36 +226,26 @@ export function ProtectedAssetsTable() {
 
   // Create Form Submit
   const handleCreateSubmit = async (values: AssetFormInput) => {
-    const actor: Actor = {
-      id: `u-${Date.now()}`,
-      name: values.ownerName,
-      email: values.ownerEmail,
-      role: 'Data Steward',
-    };
-    
-    const initialSchema: EntityField[] = [
-      { key: 'id', label: 'ID', type: 'string', sensitive: false },
-      { key: 'createdAt', label: 'Created At', type: 'date', sensitive: false },
-    ];
-
     try {
       await createMutation.mutateAsync({
-        name: values.name,
-        displayName: values.displayName,
-        category: values.category,
-        sourceApplication: values.sourceApplication,
-        department: values.department,
-        owner: actor,
+        assetName: values.displayName,
+        assetType: values.category,
+        description: values.displayName,
+        content: '',
         status: values.status,
-        version: values.version,
+        department: values.department,
+        ownerName: values.ownerName,
+        ownerEmail: values.ownerEmail,
         risk: values.risk,
-        schema: initialSchema,
-      });
+        sourceApplication: values.sourceApplication,
+      } as any);
       toast.success('Asset connected successfully!');
       setIsCreateOpen(false);
       form.reset();
-    } catch {
-      toast.error('Failed to create asset');
+      // Ensure list is fresh even if invalidation timing differs
+      createMutation.reset();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create asset');
     }
   };
 
@@ -287,22 +278,22 @@ export function ProtectedAssetsTable() {
       await updateMutation.mutateAsync({
         id: activeAsset.id,
         data: {
-          name: values.name,
-          displayName: values.displayName,
-          category: values.category,
-          sourceApplication: values.sourceApplication,
-          department: values.department,
-          owner: updatedActor,
+          assetName: values.displayName,
+          assetType: values.category,
+          description: values.displayName,
           status: values.status,
-          version: values.version,
+          department: values.department,
+          ownerName: values.ownerName,
+          ownerEmail: values.ownerEmail,
           risk: values.risk,
-        },
+          sourceApplication: values.sourceApplication,
+        } as any,
       });
       toast.success('Asset updated successfully!');
       setIsEditOpen(false);
       setActiveAsset(null);
-    } catch {
-      toast.error('Failed to update asset');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update asset');
     }
   };
 
@@ -320,8 +311,8 @@ export function ProtectedAssetsTable() {
       setIsDeleteOpen(false);
       setActiveAsset(null);
       setSelectedIds(selectedIds.filter((id) => id !== activeAsset.id));
-    } catch {
-      toast.error('Failed to delete asset');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete asset');
     }
   };
 

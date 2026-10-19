@@ -26,7 +26,8 @@ export function useCreateEntity() {
     mutationFn: (data: Omit<Entity, 'id' | 'createdAt' | 'lastChangedAt' | 'changeCount' | 'recordCount'>) =>
       AssetService.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entities });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entities, exact: false });
+      queryClient.refetchQueries({ queryKey: QUERY_KEYS.entities, type: 'active', exact: false });
     },
   });
 }
