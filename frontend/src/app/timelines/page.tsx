@@ -8,7 +8,7 @@ export default function TimelinesPage() {
     <AppShell>
       <PageHeader
         title="Audit Timeline"
-        description="Chronological version history of changes, cryptographically linked to form a tamper-evident chain."
+        description="Chronological history of every recorded change — newest first — with the actor, operation and summary for each event."
       />
       <TimelineView />
     </AppShell>

@@ -26,11 +26,20 @@ export async function GET(
     };
   }).reverse(); // Sort back to newest first
 
+  const { searchParams } = new URL(request.url);
+  // `page` is ZERO-based on the wire (see /api/assets route).
+  const page = Math.max(0, Number(searchParams.get('page') || '0') || 0);
+  const pageSize = Number(searchParams.get('pageSize') || '100');
+
+  const total = versions.length;
+  const start = page * pageSize;
+  const paged = versions.slice(start, start + pageSize);
+
   return NextResponse.json({
-    data: versions,
-    total: versions.length,
-    page: 1,
-    pageSize: 100,
-    totalPages: 1,
+    data: paged,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
   });
 }

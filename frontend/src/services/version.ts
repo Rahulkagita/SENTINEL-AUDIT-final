@@ -1,4 +1,5 @@
 import { httpClient } from './http-client';
+import { toApiListParams } from '@/lib/pagination';
 import type { ApiListParams, PaginatedResponse, AuditLogEntry } from '@/types';
 
 // DTOs & Response Models
@@ -18,9 +19,14 @@ export interface RestoreVersionResponse {
   restoredVersion?: VersionResponse;
 }
 
+/** GET /api/versions/asset/{id} understands only page (ZERO-based) and pageSize. */
+const VERSION_LIST_KEYS = ['page', 'pageSize'] as const;
+
 export const VersionService = {
   async getVersionsByAssetId(assetId: string, params?: ApiListParams): Promise<PaginatedResponse<VersionResponse>> {
-    return httpClient.get<PaginatedResponse<VersionResponse>>(`/versions/asset/${assetId}`, { params });
+    return httpClient.get<PaginatedResponse<VersionResponse>>(`/versions/asset/${assetId}`, {
+      params: toApiListParams(params, VERSION_LIST_KEYS),
+    });
   },
 
   async restoreVersion(request: RestoreVersionRequest): Promise<RestoreVersionResponse> {

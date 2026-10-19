@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { Database, Search } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -23,9 +23,24 @@ const item = {
 
 export function EntityGrid() {
   const [search, setSearch] = useState('');
-  const { data, isLoading } = useEntities({ page: 1, pageSize: 50, search });
+  // Page 1 is the first UI page; AssetService.list translates it to the
+  // zero-based `page=0` the backend expects.
+  const { data, isLoading } = useEntities({ page: 1, pageSize: 50 });
 
-  const entities: Entity[] = data?.data ?? [];
+  // GET /api/assets has no server-side search, so the search box filters the
+  // fetched page locally instead of sending a parameter the backend ignores.
+  const entities: Entity[] = useMemo(() => {
+    const all: Entity[] = data?.data ?? [];
+    const query = search.trim().toLowerCase();
+    if (!query) return all;
+    return all.filter(
+      (entity) =>
+        entity.displayName?.toLowerCase().includes(query) ||
+        entity.name?.toLowerCase().includes(query) ||
+        entity.sourceApplication?.toLowerCase().includes(query) ||
+        entity.owner?.name?.toLowerCase().includes(query),
+    );
+  }, [data?.data, search]);
 
   return (
     <div className="space-y-4">

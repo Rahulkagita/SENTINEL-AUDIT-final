@@ -136,6 +136,11 @@ export function ProtectedAssetsTable() {
   const [isImporting, setIsImporting] = useState(false);
 
   // TanStack queries/mutations
+  //
+  // Pagination contract: the UI counts pages from 1 (this `page: 1` is the
+  // first page a user sees), while GET /api/assets is ZERO-based. The
+  // translation happens once in AssetService.list via toApiPage(), so the
+  // first visible page always requests page=0 from the backend.
   const { data, isLoading } = useEntities({ page: 1, pageSize: 100 });
   const createMutation = useCreateEntity();
   const updateMutation = useUpdateEntity();
@@ -224,6 +229,21 @@ export function ProtectedAssetsTable() {
     }
   };
 
+  /**
+   * After an asset is created it must be visible on the screen the user is
+   * looking at. Creation already invalidates/refetches every asset-list
+   * query; additionally reset the local search/filters/page so none of them
+   * can hide the new row (the list would otherwise still be scoped to the
+   * previous search term, department, status or risk filter).
+   */
+  const revealNewAsset = () => {
+    setSearch('');
+    setDeptFilter('all');
+    setStatusFilter('all');
+    setRiskFilter('all');
+    setPage(1);
+  };
+
   // Create Form Submit
   const handleCreateSubmit = async (values: AssetFormInput) => {
     try {
@@ -242,6 +262,7 @@ export function ProtectedAssetsTable() {
       toast.success('Asset connected successfully!');
       setIsCreateOpen(false);
       form.reset();
+      revealNewAsset();
       // Ensure list is fresh even if invalidation timing differs
       createMutation.reset();
     } catch (err: any) {
@@ -414,6 +435,7 @@ export function ProtectedAssetsTable() {
       toast.success(`Successfully connected asset "${importFile.name}"!`);
       setIsImportOpen(false);
       setImportFile(null);
+      revealNewAsset();
     } catch {
       toast.error('Failed to import asset schema.');
     } finally {

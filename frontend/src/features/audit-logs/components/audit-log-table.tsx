@@ -38,22 +38,36 @@ const row = {
 };
 
 export function AuditLogTable() {
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(1); // one-based UI page (service -> zero-based on the wire)
   const [search, setSearch] = useState('');
   const [operation, setOperation] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { data, isLoading } = useAuditLogs({
+  // GET /api/audit/logs applies search/operation server-side (real params);
+  // sort/order/filter objects are not supported and are never sent.
+  const { data, isLoading, isError, error, refetch } = useAuditLogs({
     page,
     pageSize: 10,
-    search,
-  filter: operation !== 'all' ? { operation } : undefined,
-  sort: 'createdAt',
-    order: 'desc',
+    search: search.trim() || undefined,
+    operation: operation !== 'all' ? operation : undefined,
   });
 
   const logs: AuditLogEntry[] = data?.data ?? [];
   const selected = logs.find((l: AuditLogEntry) => l.id === selectedId) ?? null;
+
+  if (isError) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center space-y-2">
+        <p className="text-sm font-semibold text-foreground">Failed to load audit entries</p>
+        <p className="text-xs text-muted-foreground">
+          {error instanceof Error ? error.message : 'The audit log request could not be completed.'}
+        </p>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -133,7 +147,9 @@ export function AuditLogTable() {
                     </TableCell>
                     <TableCell className="text-right">
                       <code className="font-mono text-2xs text-muted-foreground">
-                        {log.hash.slice(0, 10)}…
+                        {/* No hash chain is implemented - render an explicit
+                            placeholder instead of a fabricated value. */}
+                        {log.hash ? `${log.hash.slice(0, 10)}…` : '—'}
                       </code>
                     </TableCell>
                   </motion.tr>
@@ -145,7 +161,8 @@ export function AuditLogTable() {
           {data && data.totalPages > 1 && (
             <div className="flex items-center justify-between pt-4">
               <p className="text-sm text-muted-foreground">
-                Page {data.page} of {data.totalPages} · {data.total} entries
+                {/* Show the one-based UI page, not the zero-based API page. */}
+                Page {page} of {data.totalPages} · {data.total} entries
               </p>
               <div className="flex gap-2">
                 <Button

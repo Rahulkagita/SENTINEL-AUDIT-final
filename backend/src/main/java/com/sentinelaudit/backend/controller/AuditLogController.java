@@ -7,7 +7,6 @@ import com.sentinelaudit.backend.exception.BadRequestException;
 import com.sentinelaudit.backend.response.PaginatedResponse;
 import com.sentinelaudit.backend.service.AuditLogService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,21 +22,30 @@ public class AuditLogController {
     // ===========================
     // AUDIT LOG LISTING
     // ===========================
+    /**
+     * Paginated audit logs, newest first.
+     *
+     * <p>{@code page} is ZERO-based (0 = first page). {@code search} and
+     * {@code operation} are applied by the backend, so the response only
+     * contains matching rows and {@code total} reflects the filtered count.
+     */
     @GetMapping("/logs")
     public PaginatedResponse<AuditLogResponseDto> getLogs(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int pageSize) {
+            @RequestParam(defaultValue = "50") int pageSize,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String operation) {
 
         validatePaging(page, pageSize);
 
-        Page<AuditLog> logs = service.getAllLogs(page, pageSize);
+        AuditLogService.LogPage result = service.getLogs(page, pageSize, operation, search);
 
         return PaginatedResponse.<AuditLogResponseDto>builder()
-                .data(logs.getContent().stream().map(AuditLogResponseDto::from).toList())
-                .total(logs.getTotalElements())
-                .page(logs.getNumber())
-                .pageSize(logs.getSize())
-                .totalPages(logs.getTotalPages())
+                .data(result.content().stream().map(AuditLogResponseDto::from).toList())
+                .total(result.total())
+                .page(result.page())
+                .pageSize(pageSize)
+                .totalPages(result.totalPages())
                 .build();
     }
 
@@ -49,19 +57,28 @@ public class AuditLogController {
     // ===========================
     // TIMELINE (per-asset history)
     // ===========================
+    /**
+     * Paginated timeline of audit events, newest first.
+     *
+     * <p>{@code page} is ZERO-based (0 = first page). {@code assetId},
+     * {@code search} and {@code operation} narrow the result server-side;
+     * they are never silently ignored.
+     */
     @GetMapping("/timeline")
     public PaginatedResponse<TimelineResponseDto> getTimeline(
             @RequestParam(required = false) Long assetId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int pageSize) {
+            @RequestParam(defaultValue = "50") int pageSize,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String operation) {
 
         validatePaging(page, pageSize);
 
         // assetId narrows the timeline to one asset. When omitted, every
-        // audit record is returned as a timeline event.
-        List<AuditLog> logs = (assetId == null)
-                ? service.getAllLogsSorted()
-                : service.getLogsByAssetId(assetId);
+        // audit record is returned as a timeline event. Filters are applied
+        // by the service before pagination, so `total` is the size of the
+        // actual (filtered) result set.
+        List<AuditLog> logs = service.getTimeline(assetId, operation, search);
 
         int from = Math.min(page * pageSize, logs.size());
         int to = Math.min(from + pageSize, logs.size());

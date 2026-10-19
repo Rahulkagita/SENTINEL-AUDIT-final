@@ -20,13 +20,27 @@ export function useEntity(id: string) {
   });
 }
 
+/**
+ * Asset mutations (create/update/delete) write audit records, so they must
+ * refresh every affected list: the asset lists themselves plus the Audit
+ * Timeline and Audit Logs views, which would otherwise keep showing stale
+ * (pre-creation) data until their own cache entry expired.
+ */
+function invalidateAssetSideEffects(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entities, exact: false });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timelines, exact: false });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.auditLogs, exact: false });
+}
+
 export function useCreateEntity() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<Entity, 'id' | 'createdAt' | 'lastChangedAt' | 'changeCount' | 'recordCount'>) =>
       AssetService.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entities, exact: false });
+      invalidateAssetSideEffects(queryClient);
+      // Refetch the asset lists that are currently on screen so the newly
+      // created asset appears immediately, regardless of cache timing.
       queryClient.refetchQueries({ queryKey: QUERY_KEYS.entities, type: 'active', exact: false });
     },
   });
@@ -38,7 +52,7 @@ export function useUpdateEntity() {
     mutationFn: ({ id, data }: { id: string; data: Partial<Entity> }) =>
       AssetService.update(id, data),
     onSuccess: (_, { id }) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entities });
+      invalidateAssetSideEffects(queryClient);
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entity(id) });
     },
   });
@@ -49,7 +63,7 @@ export function useDeleteEntity() {
   return useMutation({
     mutationFn: (id: string) => AssetService.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entities });
+      invalidateAssetSideEffects(queryClient);
     },
   });
 }

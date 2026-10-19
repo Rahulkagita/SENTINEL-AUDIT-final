@@ -1,4 +1,5 @@
 import { httpClient } from './http-client';
+import { toApiListParams } from '@/lib/pagination';
 import type { Anomaly, AnomalyStatus, ApiListParams, PaginatedResponse } from '@/types';
 
 // DTOs & Interfaces
@@ -11,10 +12,15 @@ export interface AnomalyUpdateDto {
   status: AnomalyStatus;
 }
 
+/** The anomalies endpoint paginates with page (ZERO-based) and pageSize only. */
+const ANOMALY_LIST_KEYS = ['page', 'pageSize'] as const;
+
 export const AnalyticsService = {
   // Anomalies
   async listAnomalies(params?: AnomalyQueryDto): Promise<PaginatedResponse<Anomaly>> {
-    return httpClient.get<PaginatedResponse<Anomaly>>('/analytics/anomalies', { params });
+    return httpClient.get<PaginatedResponse<Anomaly>>('/analytics/anomalies', {
+      params: toApiListParams(params, ANOMALY_LIST_KEYS),
+    });
   },
 
   async getAnomalyById(id: string): Promise<Anomaly> {

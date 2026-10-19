@@ -210,5 +210,10 @@ export interface ApiError {
 }
 
 export interface ApiListParams extends PaginationParams {
-  filter?: Record<string, unknown>;
+  /**
+   * Operation filter (CREATE/UPDATE/DELETE/RESTORE) understood natively by
+   * the audit endpoints (`/audit/logs`, `/audit/timeline`). The backend
+   * applies it server-side, so only matching rows are returned.
+   */
+  operation?: string;
 }

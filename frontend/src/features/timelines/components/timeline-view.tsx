@@ -1,36 +1,28 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   GitBranch,
-  Link2,
   ChevronDown,
   ChevronUp,
-  MapPin,
-  Laptop,
-  Globe,
-  Network,
-  Calendar,
-  Lock,
-  CornerDownRight,
-  ShieldCheck,
   Search,
   MessageSquare,
-  FileJson,
+  Database,
+  Clock,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
-import { useAuditLogs } from '@/hooks/use-audit-logs';
+import { useTimeline } from '@/hooks/use-timeline';
 import { EmptyState } from '@/components/common/empty-state';
 import { TableSkeleton } from '@/components/common/loading-skeletons';
-import { OperationBadge, SeverityBadge, AuditStatusBadge } from '@/components/common/status-badges';
+import { OperationBadge } from '@/components/common/status-badges';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DiffViewer } from '@/components/common/diff-viewer';
 import { formatDateTime, formatRelative, initials, getInitialsColor } from '@/lib/format';
-import type { AuditLogEntry, ChangeOperation } from '@/types';
+import type { TimelineEvent } from '@/types';
 
 // framer-motion list layout animations
 const container = {
@@ -42,94 +34,52 @@ const item = {
   show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 260, damping: 24 } },
 };
 
-// Simple User Agent string parser helper
-function parseUserAgent(uaString: string): { device: string; browser: string } {
-  if (!uaString) return { device: 'Unknown', browser: 'API Integration' };
-  
-  let device = 'Server Host';
-  let browser = 'SentinelAudit Client';
-
-  // Device check
-  if (uaString.includes('Macintosh') || uaString.includes('Mac OS X')) {
-    device = 'macOS';
-  } else if (uaString.includes('Windows')) {
-    device = 'Windows PC';
-  } else if (uaString.includes('Linux')) {
-    device = 'Linux Station';
-  } else if (uaString.includes('iPhone') || uaString.includes('iPad')) {
-    device = 'Apple Mobile';
-  } else if (uaString.includes('Android')) {
-    device = 'Android Device';
-  }
-
-  // Browser check
-  if (uaString.includes('Chrome') && !uaString.includes('Edg')) {
-    browser = 'Chrome Browser';
-  } else if (uaString.includes('Safari') && !uaString.includes('Chrome')) {
-    browser = 'Safari Browser';
-  } else if (uaString.includes('Firefox')) {
-    browser = 'Mozilla Firefox';
-  } else if (uaString.includes('Edg')) {
-    browser = 'Microsoft Edge';
-  } else if (uaString.includes('SentinelAudit')) {
-    browser = 'Sentinel SDK v1.4';
-  }
-
-  return { device, browser };
-}
-
-// IP to Mock City/Country mapping
-function resolveIpLocation(ip: string): string {
-  if (!ip) return 'Remote Gateway';
-  const lastOctet = parseInt(ip.split('.').pop() || '0', 10);
-
-  const locations = [
-    'San Francisco, US',
-    'Dallas, US',
-    'Frankfurt, DE',
-    'London, GB',
-    'Tokyo, JP',
-    'Singapore, SG',
-    'Sydney, AU',
-    'Paris, FR',
-    'Toronto, CA',
-    'Dublin, IE',
-  ];
-
-  return locations[lastOctet % locations.length];
-}
-
-// Severity to Numeric Risk Score mapping
-function resolveRiskScore(severity: string): number {
-  switch (severity) {
-    case 'critical':
-      return 96;
-    case 'anomaly':
-      return 84;
-    case 'warning':
-      return 52;
-    default:
-      return 12;
-  }
-}
+const TIMELINE_PAGE_SIZE = 30;
 
 export function TimelineView() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  
-  // Filtering and Search local states
+
+  // Filtering and Search states. `search` is the raw input; the debounced
+  // value is what actually hits GET /api/audit/timeline, where the backend
+  // applies it server-side (unsupported params are never sent).
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [operation, setOperation] = useState<string>('all');
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(1); // one-based UI page (service -> page=0 on the wire)
 
-  // Fetch audit log entries which contain snapshot data
-  const { data, isLoading } = useAuditLogs({
-    page,
-    pageSize: 30,
-    search,
-    filter: operation !== 'all' ? { operation } : undefined,
-  });
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
-  const logs: AuditLogEntry[] = data?.data ?? [];
+  const query = useMemo(
+    () => ({
+      page,
+      pageSize: TIMELINE_PAGE_SIZE,
+      search: debouncedSearch || undefined,
+      operation: operation !== 'all' ? operation : undefined,
+    }),
+    [page, debouncedSearch, operation],
+  );
+
+  // Dedicated timeline endpoint: zero-based pages, real search/operation
+  // filters, newest-first CREATE/UPDATE/DELETE events.
+  const { data, isLoading, isError, error, refetch } = useTimeline(query);
+
+  const events: TimelineEvent[] = data?.data ?? [];
+  const hasActiveFilters = Boolean(debouncedSearch) || operation !== 'all';
+
+  // If the result set shrinks below the current page, snap back to the last
+  // real page instead of showing a phantom empty page.
+  const totalPages = data?.totalPages ?? 1;
+  useEffect(() => {
+    if (data && data.totalPages >= 1 && page > data.totalPages) {
+      setPage(data.totalPages);
+    }
+  }, [data, page]);
 
   const handleToggleExpand = (id: string) => {
     setExpandedId(expandedId === id ? null : id);
@@ -144,6 +94,28 @@ export function TimelineView() {
     );
   }
 
+  // API errors are surfaced honestly instead of masquerading as an empty
+  // timeline ("no events") - the distinction matters for an audit tool.
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center space-y-3">
+          <AlertTriangle className="mx-auto h-8 w-8 text-destructive" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Failed to load the audit timeline</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {error instanceof Error ? error.message : 'The timeline request could not be completed.'}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="mr-2 h-3.5 w-3.5" />
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Search and Filters Toolbar */}
@@ -153,10 +125,7 @@ export function TimelineView() {
           <Input
             placeholder="Search timeline by entity, actor..."
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
+            onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
           />
         </div>
@@ -174,20 +143,22 @@ export function TimelineView() {
         </Select>
       </div>
 
-      {logs.length === 0 ? (
+      {/* Empty state only when the (possibly filtered) result set is truly
+          empty - `total` comes from the backend's filtered count. */}
+      {events.length === 0 ? (
         <EmptyState
           icon={GitBranch}
-          title="No timeline events found"
-          description="Try modifying search keywords or action filters."
+          title={hasActiveFilters ? 'No matching timeline events' : 'No timeline events yet'}
+          description={
+            hasActiveFilters
+              ? 'The backend returned no events for the current search/action filters.'
+              : 'Audit events will appear here once assets are created or changed.'
+          }
         />
       ) : (
         <motion.div variants={container} initial="hidden" animate="show" className="relative pl-4 sm:pl-6 border-l border-border/80 ml-3 space-y-6">
-          {logs.map((event) => {
+          {events.map((event) => {
             const isExpanded = expandedId === event.id;
-            const { device, browser } = parseUserAgent(event.userAgent);
-            const location = resolveIpLocation(event.ipAddress);
-            const riskScore = resolveRiskScore(event.severity);
-            const mockVersion = `v2.${1 + (parseInt(event.id.replace(/\D/g, '') || '0') % 5)}.0`;
 
             return (
               <motion.div
@@ -225,41 +196,21 @@ export function TimelineView() {
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                       <OperationBadge operation={event.operation} />
-                      
+
                       <div className="leading-tight">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-foreground">{event.entityName}</h4>
-                          <span className="text-3xs font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
-                            {mockVersion}
-                          </span>
-                        </div>
+                        <h4 className="text-sm font-bold text-foreground">{event.entityName}</h4>
                         <p className="mt-1 text-xs text-muted-foreground max-w-lg truncate">
-                          {event.reason || `Modified database schema for ${event.entityName}.`}
+                          {event.summary}
                         </p>
                       </div>
                     </div>
 
                     {/* Metadata indicators */}
                     <div className="flex items-center gap-4 flex-wrap text-xs sm:self-end lg:self-center">
-                      {/* Risk Indicator badge */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-2xs text-muted-foreground">Risk Score:</span>
-                        <Badge
-                          variant="outline"
-                          className={`text-4xs font-bold py-0.5 ${
-                            riskScore > 80
-                              ? 'border-destructive/30 bg-destructive/5 text-destructive'
-                              : riskScore > 40
-                              ? 'border-warning/30 bg-warning/5 text-warning'
-                              : 'border-success/30 bg-success/5 text-success'
-                          }`}
-                        >
-                          {riskScore}/100
-                        </Badge>
-                      </div>
-
-                      {/* Blockchain status */}
-                      <AuditStatusBadge status={event.status} />
+                      {/* Actor (real value from the audit record) */}
+                      <span className="text-2xs text-muted-foreground whitespace-nowrap">
+                        by {event.actor.name}
+                      </span>
 
                       {/* Timestamp */}
                       <span className="text-2xs text-muted-foreground whitespace-nowrap">
@@ -293,36 +244,41 @@ export function TimelineView() {
                         <div className="p-5 space-y-6 text-sm">
                           {/* Grid layout */}
                           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                            {/* Left: Changes and reason comments */}
+                            {/* Left: real event summary */}
                             <div className="lg:col-span-7 space-y-4">
                               <div>
                                 <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                                  <CornerDownRight className="h-3.5 w-3.5" />
-                                  Delta Field Differences
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                  Event Summary
                                 </h5>
-                                {event.fieldChanges && event.fieldChanges.length > 0 ? (
-                                  <div className="rounded-lg border bg-background/50 p-1">
-                                    <DiffViewer changes={event.fieldChanges} />
-                                  </div>
-                                ) : (
-                                  <p className="text-xs text-muted-foreground italic pl-5">
-                                    No direct field changes logged (Create/Delete operations).
-                                  </p>
-                                )}
+                                <div className="bg-background/40 border p-3 rounded-lg text-xs leading-relaxed text-foreground/80">
+                                  {event.summary || 'No summary recorded for this event.'}
+                                </div>
                               </div>
 
                               <div>
                                 <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                                  <MessageSquare className="h-3.5 w-3.5" />
-                                  Steward Reason Comment
+                                  <Database className="h-3.5 w-3.5" />
+                                  Record Reference
                                 </h5>
-                                <div className="bg-background/40 border p-3 rounded-lg text-xs leading-relaxed italic text-foreground/80">
-                                  &ldquo;{event.reason || 'Cryptographic auto-sync registered during system check.'}&rdquo;
-                                </div>
+                                <dl className="bg-background/40 border rounded-lg divide-y divide-border/60 text-xs">
+                                  <div className="flex items-center justify-between px-3 py-2">
+                                    <dt className="text-muted-foreground">Entity</dt>
+                                    <dd className="font-mono text-foreground">{event.entityId || '—'}</dd>
+                                  </div>
+                                  <div className="flex items-center justify-between px-3 py-2">
+                                    <dt className="text-muted-foreground">Audit record</dt>
+                                    <dd className="font-mono text-foreground">{event.auditLogId || '—'}</dd>
+                                  </div>
+                                  <div className="flex items-center justify-between px-3 py-2">
+                                    <dt className="text-muted-foreground">Operation</dt>
+                                    <dd className="font-semibold text-foreground">{event.operation}</dd>
+                                  </div>
+                                </dl>
                               </div>
                             </div>
 
-                            {/* Right: Actor & Metadata */}
+                            {/* Right: Actor & Timestamps */}
                             <div className="lg:col-span-5 space-y-4">
                               {/* Steward User */}
                               <div className="p-3.5 rounded-xl border bg-background/40 space-y-3">
@@ -337,91 +293,42 @@ export function TimelineView() {
                                   </Avatar>
                                   <div className="leading-tight">
                                     <p className="text-xs font-bold text-foreground">{event.actor.name}</p>
-                                    <p className="text-3xs text-muted-foreground">{event.actor.role} &bull; {event.actor.email}</p>
+                                    <p className="text-3xs text-muted-foreground">
+                                      {event.actor.role}
+                                      {event.actor.email ? ` • ${event.actor.email}` : ''}
+                                    </p>
                                   </div>
                                 </div>
                               </div>
 
-                              {/* Connections details */}
+                              {/* Timestamps */}
                               <div className="p-3.5 rounded-xl border bg-background/40 space-y-3.5 text-xs">
                                 <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Terminal Signatures
+                                  Timing
                                 </h5>
-
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
                                     <span className="flex items-center gap-1 text-muted-foreground text-2xs">
-                                      <Network className="h-3 w-3" /> IP Address
+                                      <Clock className="h-3 w-3" /> Recorded at
                                     </span>
-                                    <span className="font-mono text-xs">{event.ipAddress}</span>
+                                    <span className="text-foreground">{formatDateTime(event.createdAt)}</span>
                                   </div>
-
                                   <div className="flex items-center justify-between">
                                     <span className="flex items-center gap-1 text-muted-foreground text-2xs">
-                                      <MapPin className="h-3 w-3" /> Location
+                                      <Clock className="h-3 w-3" /> Relative
                                     </span>
-                                    <span className="font-semibold">{location}</span>
-                                  </div>
-
-                                  <div className="flex items-center justify-between">
-                                    <span className="flex items-center gap-1 text-muted-foreground text-2xs">
-                                      <Laptop className="h-3 w-3" /> Device
-                                    </span>
-                                    <span className="font-semibold">{device}</span>
-                                  </div>
-
-                                  <div className="flex items-center justify-between">
-                                    <span className="flex items-center gap-1 text-muted-foreground text-2xs">
-                                      <Globe className="h-3 w-3" /> Browser
-                                    </span>
-                                    <span className="font-semibold">{browser}</span>
+                                    <span className="font-semibold">{formatRelative(event.createdAt)}</span>
                                   </div>
                                 </div>
                               </div>
                             </div>
                           </div>
 
-                          {/* Cryptographic block hashes */}
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 bg-accent/5 border border-accent/15 rounded-lg text-2xs text-muted-foreground font-mono">
-                            <span className="flex items-center gap-1.5 text-accent font-semibold">
-                              <ShieldCheck className="h-3.5 w-3.5 animate-pulse-soft" />
-                              LEDGER LINK VERIFIED
-                            </span>
-                            <div className="flex items-center gap-3">
-                              <span>
-                                Hash: <span className="text-foreground">{event.hash.slice(0, 16)}...</span>
-                              </span>
-                              <span>
-                                Prev: <span className="text-foreground">{event.previousHash.slice(0, 16)}...</span>
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Snapshot JSON views */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                                <FileJson className="h-3.5 w-3.5" />
-                                Old Value (beforeSnapshot)
-                              </h5>
-                              <pre className="bg-muted border text-2xs font-mono p-3 rounded-lg overflow-x-auto max-h-[220px]">
-                                {event.beforeSnapshot
-                                  ? JSON.stringify(event.beforeSnapshot, null, 2)
-                                  : '// No pre-existing values (CREATE operation)'}
-                              </pre>
-                            </div>
-                            <div>
-                              <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                                <FileJson className="h-3.5 w-3.5" />
-                                New Value (afterSnapshot)
-                              </h5>
-                              <pre className="bg-muted border text-2xs font-mono p-3 rounded-lg overflow-x-auto max-h-[220px]">
-                                {event.afterSnapshot
-                                  ? JSON.stringify(event.afterSnapshot, null, 2)
-                                  : '// No new values remaining (DELETE operation)'}
-                              </pre>
-                            </div>
-                          </div>
+                          {/* Integrity note - stated honestly: no hash chain exists */}
+                          <p className="p-3 bg-muted/40 border border-border/60 rounded-lg text-2xs text-muted-foreground">
+                            No integrity hash is recorded for audit events — SentinelAudit does not
+                            currently compute a hash chain, so no hash values are shown.
+                          </p>
                         </div>
                       </motion.div>
                     )}
@@ -431,6 +338,35 @@ export function TimelineView() {
             );
           })}
         </motion.div>
+      )}
+
+      {/* Pagination footer (zero-based pages are requested; the UI shows 1-based) */}
+      {events.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-muted-foreground">
+            Page {page} of {totalPages} &bull; {data?.total ?? events.length} events
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );

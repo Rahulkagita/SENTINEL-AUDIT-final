@@ -7,7 +7,10 @@ export async function GET(request: Request) {
   const workspaceId = getWorkspaceId(request);
   const { searchParams } = new URL(request.url);
   const search = searchParams.get('search')?.toLowerCase();
-  const page = Number(searchParams.get('page') || '1');
+  // `page` is ZERO-based on the wire: the service layer converts the UI's
+  // one-based page (1 -> 0) with toApiPage(), matching the Spring Data
+  // contract used by the real backend.
+  const page = Math.max(0, Number(searchParams.get('page') || '0') || 0);
   const pageSize = Number(searchParams.get('pageSize') || '20');
 
   let data = [...mockData.getEntities(workspaceId)];
@@ -21,7 +24,7 @@ export async function GET(request: Request) {
   }
 
   const total = data.length;
-  const start = (page - 1) * pageSize;
+  const start = page * pageSize;
   const paged = data.slice(start, start + pageSize);
 
   return NextResponse.json({
