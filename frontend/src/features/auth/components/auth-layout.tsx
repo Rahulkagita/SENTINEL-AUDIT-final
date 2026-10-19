@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Shield, Fingerprint, Lock, CheckCircle2 } from 'lucide-react';
+import { Database, History, ScrollText } from 'lucide-react';
 import { BrandMark } from '@/components/common/brand-mark';
 import { APP_NAME, APP_TAGLINE } from '@/lib/constants';
 
@@ -11,10 +11,16 @@ interface AuthLayoutProps {
   subtitle: string;
 }
 
+const features = [
+  { icon: ScrollText, text: 'Audit log of every create, update, and delete' },
+  { icon: History, text: 'Version history with one-click restore' },
+  { icon: Database, text: 'Tracked data assets with owners and metadata' },
+];
+
 export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
   return (
     <div className="flex min-h-screen w-full bg-background">
-      {/* Left side: Premium enterprise branding panel (hidden on mobile) */}
+      {/* Left side: branding panel (hidden on mobile) */}
       <div className="relative hidden w-1/2 overflow-hidden bg-sidebar p-12 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between">
         {/* Background Decorative Grid and Blobs */}
         <div className="pointer-events-none absolute inset-0 bg-grid opacity-10 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
@@ -39,7 +45,8 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
               {APP_TAGLINE}
             </h1>
             <p className="text-sm text-sidebar-foreground/75 leading-relaxed">
-              Cryptographically secure, AI-powered transaction logs that satisfy compliance audits and detect insider threat anomalies instantly.
+              {APP_NAME} records changes to your data assets and keeps a version history you
+              can search, review, and restore from.
             </p>
           </motion.div>
 
@@ -55,11 +62,7 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
             }}
             className="space-y-3.5"
           >
-            {[
-              { icon: Shield, text: 'Cryptographic hash-linked ledger blocks' },
-              { icon: Fingerprint, text: 'Detailed, identity-anchored audit trails' },
-              { icon: Lock, text: 'HIPAA, SOC2, and GDPR compliant designs' },
-            ].map((item, idx) => {
+            {features.map((item, idx) => {
               const Icon = item.icon;
               return (
                 <motion.li
@@ -80,11 +83,8 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
           </motion.ul>
         </div>
 
-        <div className="relative z-10 flex items-center gap-2 rounded-xl bg-sidebar-foreground/5 p-4 border border-sidebar-border max-w-sm">
-          <CheckCircle2 className="h-5 w-5 text-accent shrink-0" />
-          <p className="text-xs text-sidebar-foreground/70">
-            All database modifications hashed and verified. Over <span className="font-semibold text-accent">34,000+ logs</span> checked.
-          </p>
+        <div className="relative z-10 text-xs text-sidebar-foreground/50">
+          {APP_NAME} — authentication is handled by the Spring Boot backend using JWT.
         </div>
       </div>
 

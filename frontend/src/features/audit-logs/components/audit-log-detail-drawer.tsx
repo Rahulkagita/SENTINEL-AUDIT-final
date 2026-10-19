@@ -1,14 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import {
-  Fingerprint,
-  Globe,
-  Hash,
-  Monitor,
-  ShieldCheck,
-  User,
-} from 'lucide-react';
+import { Globe, Info, Monitor, User } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -18,11 +11,7 @@ import {
 } from '@/components/ui/sheet';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import {
-  OperationBadge,
-  SeverityBadge,
-  AuditStatusBadge,
-} from '@/components/common/status-badges';
+import { OperationBadge } from '@/components/common/status-badges';
 import { DiffViewer } from '@/components/common/diff-viewer';
 import { formatDateTime, formatRelative, initials, getInitialsColor } from '@/lib/format';
 import type { AuditLogEntry } from '@/types';
@@ -42,8 +31,6 @@ export function AuditLogDetailDrawer({ entry, open, onOpenChange }: AuditLogDeta
             <SheetHeader>
               <div className="flex items-center gap-2">
                 <OperationBadge operation={entry.operation} />
-                <SeverityBadge severity={entry.severity} />
-                <AuditStatusBadge status={entry.status} />
               </div>
               <SheetTitle className="text-xl">{entry.entityName}</SheetTitle>
               <SheetDescription>
@@ -70,7 +57,8 @@ export function AuditLogDetailDrawer({ entry, open, onOpenChange }: AuditLogDeta
                       <span className="text-sm font-medium">{entry.actor.name}</span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {entry.actor.role} · {entry.actor.email}
+                      {entry.actor.role}
+                      {entry.actor.email ? ` · ${entry.actor.email}` : ''}
                     </p>
                   </div>
                 </div>
@@ -79,12 +67,14 @@ export function AuditLogDetailDrawer({ entry, open, onOpenChange }: AuditLogDeta
                   <div className="flex items-center gap-1.5">
                     <Globe className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-muted-foreground">IP:</span>
-                    <code className="font-mono">{entry.ipAddress}</code>
+                    {/* The backend does not capture client IP — show an explicit
+                        placeholder rather than an empty string. */}
+                    <code className="font-mono">{entry.ipAddress || 'not captured'}</code>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-muted-foreground">Source:</span>
-                    <span>{entry.sourceApplication}</span>
+                    <span>{entry.sourceApplication || 'SentinelAudit'}</span>
                   </div>
                   {entry.reason && (
                     <div className="col-span-2 flex items-center gap-1.5">
@@ -97,30 +87,26 @@ export function AuditLogDetailDrawer({ entry, open, onOpenChange }: AuditLogDeta
 
               <div>
                 <h4 className="mb-3 text-sm font-semibold">Field Changes</h4>
-                <DiffViewer changes={entry.fieldChanges} />
+                {entry.fieldChanges && entry.fieldChanges.length > 0 ? (
+                  <DiffViewer changes={entry.fieldChanges} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No field-level changes recorded for this entry. The backend stores the
+                    operation, actor, and asset reference, but does not capture per-field
+                    diffs or before/after snapshots.
+                  </p>
+                )}
               </div>
 
-              <div className="rounded-xl border border-border bg-muted/30 p-4">
+              <div className="rounded-xl border border-dashed border-border bg-muted/20 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold">
-                  <ShieldCheck className="h-4 w-4 text-success" />
-                  Tamper-Evident Proof
+                  <Info className="h-4 w-4 text-muted-foreground" />
+                  About integrity verification
                 </div>
-                <Separator className="my-3" />
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center gap-2">
-                    <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Entry hash:</span>
-                    <code className="font-mono break-all">{entry.hash}</code>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Fingerprint className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Previous hash:</span>
-                    <code className="font-mono break-all">{entry.previousHash}</code>
-                  </div>
-                </div>
-                <p className="mt-3 text-2xs text-muted-foreground">
-                  Each entry is cryptographically linked to the previous one. Any tampering
-                  breaks the chain and is immediately detectable.
+                <p className="mt-2 text-xs text-muted-foreground">
+                  This platform does not implement a cryptographic hash chain, so no entry
+                  hash or previous-entry hash is available for this record. Entries are
+                  durable rows in the audit table, not tamper-evident proofs.
                 </p>
               </div>
             </motion.div>

@@ -8,7 +8,7 @@ export default function EntitiesPage() {
     <AppShell>
       <PageHeader
         title="Protected Assets"
-        description="Enterprise databases, directory structures, and file tables tracked by SentinelAudit's cryptographic ledger."
+        description="Data assets tracked by SentinelAudit. Every create, update, and delete is recorded in the audit log with version history."
       />
       <div className="mt-4">
         <ProtectedAssetsTable />

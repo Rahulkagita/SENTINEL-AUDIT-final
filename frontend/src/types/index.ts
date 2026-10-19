@@ -1,29 +1,10 @@
 export type ChangeOperation = 'CREATE' | 'UPDATE' | 'DELETE' | 'RESTORE';
 
+/** Backend emits a constant "info" — no detection engine behind it. */
 export type AuditSeverity = 'info' | 'warning' | 'critical' | 'anomaly';
 
+/** Backend emits a constant "verified" — record persisted successfully. */
 export type AuditStatus = 'verified' | 'pending' | 'flagged';
-
-export type AnomalyStatus = 'open' | 'investigating' | 'resolved' | 'dismissed';
-
-export type IntegrationStatus =
-  | 'connected'
-  | 'disconnected'
-  | 'error'
-  | 'syncing'
-  | 'pending';
-
-export type IntegrationCategory =
-  | 'healthcare'
-  | 'banking'
-  | 'education'
-  | 'government'
-  | 'legal'
-  | 'insurance'
-  | 'erp'
-  | 'crm'
-  | 'hrms'
-  | 'custom';
 
 export interface Actor {
   id: string;
@@ -102,83 +83,6 @@ export interface TimelineEvent {
   hash: string;
   previousHash: string;
   createdAt: string;
-}
-
-export interface Anomaly {
-  id: string;
-  auditLogId: string;
-  entityName: string;
-  actor: Actor;
-  severity: AuditSeverity;
-  status: AnomalyStatus;
-  title: string;
-  description: string;
-  detectedBy: 'ai' | 'rule' | 'manual';
-  confidenceScore: number;
-  signals: AnomalySignal[];
-  createdAt: string;
-  resolvedAt?: string;
-}
-
-export interface AnomalySignal {
-  label: string;
-  description: string;
-  weight: number;
-}
-
-export interface Integration {
-  id: string;
-  name: string;
-  category: IntegrationCategory;
-  status: IntegrationStatus;
-  description: string;
-  logoUrl?: string;
-  endpoint: string;
-  apiKeyMasked: string;
-  lastSyncAt?: string;
-  recordCount: number;
-  changeCount: number;
-  createdAt: string;
-}
-
-export interface DashboardMetrics {
-  totalChanges: number;
-  changesTrend: number;
-  totalEntities: number;
-  totalAnomalies: number;
-  openAnomalies: number;
-  criticalAnomalies: number;
-  activeIntegrations: number;
-  verifiedChanges: number;
-  changesOverTime: TimeSeriesPoint[];
-  operationsBreakdown: { operation: ChangeOperation; count: number }[];
-  topEntities: { entityId: string; name: string; changeCount: number }[];
-  severityBreakdown: { severity: AuditSeverity; count: number }[];
-
-  // Enterprise Dashboard Extended Metrics
-  protectedAssets: number;
-  todayChanges: number;
-  auditEvents: number;
-  versionSnapshots: number;
-  criticalAlerts: number;
-  integrityScore: number;
-  aiRiskScore: number;
-
-  activityTimeline: { date: string; readCount: number; writeCount: number }[];
-  riskDistribution: { name: string; value: number; color: string }[];
-  departmentActivity: { department: string; changes: number }[];
-  mostModifiedAssets: { assetName: string; creates: number; updates: number; deletes: number }[];
-  userActivity: { userName: string; changes: number; role: string }[];
-
-  latestAlerts: Anomaly[];
-  recentVersionChanges: AuditLogEntry[];
-  recentAuditEvents: AuditLogEntry[];
-}
-
-export interface TimeSeriesPoint {
-  date: string;
-  value: number;
-  label?: string;
 }
 
 export interface PaginationParams {

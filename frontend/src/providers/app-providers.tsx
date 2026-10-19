@@ -9,7 +9,6 @@ import { createQueryClient } from '@/lib/query-client';
 import { env } from '@/lib/env';
 
 import { AuthProvider } from '@/providers/auth-provider';
-import { WorkspaceProvider } from '@/providers/workspace-provider';
 
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => createQueryClient());
@@ -23,9 +22,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     >
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <WorkspaceProvider>
-            {children}
-          </WorkspaceProvider>
+          {children}
         </AuthProvider>
         <Toaster richColors position="top-right" />
         {env.isDevelopment ? (

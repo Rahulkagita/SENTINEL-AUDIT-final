@@ -1,25 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { BrandMark } from '@/components/common/brand-mark';
-
-const loaderMessages = [
-  'Verifying session signatures...',
-  'Checking tamper-evident registry...',
-  'Validating client credentials...',
-  'Securing cryptochain connection...',
-];
+import { APP_NAME } from '@/lib/constants';
 
 export function SessionLoader() {
-  const [msgIndex, setMsgIndex] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setMsgIndex((prev) => (prev + 1) % loaderMessages.length);
-    }, 1500);
-    return () => clearInterval(timer);
-  }, []);
 
   return (
     <div className="flex min-h-screen w-full flex-col items-center justify-center bg-background px-4">
@@ -59,20 +44,16 @@ export function SessionLoader() {
 
       <div className="mt-8 text-center min-h-[3rem]">
         <h2 className="text-sm font-semibold tracking-wide uppercase text-muted-foreground/80">
-          SentinelAudit AI
+          {APP_NAME}
         </h2>
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={msgIndex}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.25 }}
-            className="mt-2 text-sm text-foreground/70"
-          >
-            {loaderMessages[msgIndex]}
-          </motion.p>
-        </AnimatePresence>
+        <motion.p
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, delay: 0.1 }}
+          className="mt-2 text-sm text-foreground/70"
+        >
+          Restoring your session…
+        </motion.p>
       </div>
 
       {/* Progress Bar simulation */}

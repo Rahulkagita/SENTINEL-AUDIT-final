@@ -1,26 +1,19 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   GitBranch,
   ArrowLeft,
   Search,
-  SlidersHorizontal,
   ChevronLeft,
   ChevronRight,
   RotateCcw,
   Eye,
   GitCompare,
-  CheckCircle,
-  Database,
-  User,
   Clock,
-  Key,
-  ShieldCheck,
-  ChevronRightSquare,
-  Lock,
+  User,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -40,12 +33,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { initials, getInitialsColor, formatDateTime, formatRelative } from '@/lib/format';
+import { initials, formatDateTime, formatRelative } from '@/lib/format';
 import { useEntities } from '@/hooks/use-entities';
 import { useVersions, useRestoreVersion } from '@/hooks/use-versions';
 import { EmptyState } from '@/components/common/empty-state';
-import { DiffViewer } from '@/components/common/diff-viewer';
-import type { AuditLogEntry, Entity } from '@/types';
+import type { Entity } from '@/types';
 import type { VersionResponse } from '@/services/version';
 
 // Stagger variant animations
@@ -61,12 +53,19 @@ const cardAnimation = {
 export default function VersionHistoryPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const activeAssetId = searchParams.get('assetId') || 'e1';
+  // No hardcoded default — fall back to the first real asset once loaded.
+  const urlAssetId = searchParams.get('assetId');
 
   // Load all assets to populate the selector dropdown
-  const { data: assetsData } = useEntities({ page: 1, pageSize: 50 });
-  const assets: Entity[] = assetsData?.data ?? [];
-  const activeAsset = assets.find((a) => a.id === activeAssetId) || assets[0];
+  const { data: assetsData, isLoading: assetsLoading } = useEntities({ page: 1, pageSize: 50 });
+  const assets: Entity[] = useMemo(() => assetsData?.data ?? [], [assetsData?.data]);
+
+  const activeAssetId = useMemo(() => {
+    if (urlAssetId && assets.some((a) => a.id === urlAssetId)) return urlAssetId;
+    return assets[0]?.id ?? '';
+  }, [urlAssetId, assets]);
+
+  const activeAsset = assets.find((a) => a.id === activeAssetId) || null;
 
   // Load versions directly from VersionService
   const { data: versionsData, isLoading } = useVersions(activeAssetId);
@@ -83,6 +82,12 @@ export default function VersionHistoryPage() {
 
   const restoreVersionMutation = useRestoreVersion();
   const isRestoring = restoreVersionMutation.isPending;
+
+  // Clear the stale selection when switching assets
+  useEffect(() => {
+    setSelectedVersionName(null);
+    setCardPage(1);
+  }, [activeAssetId]);
 
   // Filtered versions list
   const filteredVersions = useMemo(() => {
@@ -112,7 +117,7 @@ export default function VersionHistoryPage() {
     return versions[0];
   }, [versions, selectedVersionName]);
 
-  // Previous Version object (for GitHub Compare Split View)
+  // Previous Version object (for the split-view comparison)
   const previousVersion = useMemo(() => {
     if (!activeVersion) return null;
     const currentIndex = versions.findIndex((v: VersionResponse) => v.versionName === activeVersion.versionName);
@@ -120,8 +125,10 @@ export default function VersionHistoryPage() {
     return versions[currentIndex + 1]; // Next in the list (since list is sorted newest first)
   }, [versions, activeVersion]);
 
-  // Handle Restore
-  const triggerRestoreSimulation = async () => {
+  // Handle Restore — real POST /api/versions/restore. The backend preserves
+  // history (the pre-restore state stays stored) and records a RESTORE
+  // audit event for the operation.
+  const handleRestore = async () => {
     if (!activeVersion) return;
     try {
       const res = await restoreVersionMutation.mutateAsync({
@@ -129,46 +136,16 @@ export default function VersionHistoryPage() {
         versionName: activeVersion.versionName,
       });
       setIsRestoreOpen(false);
-      toast.success(res.message || `Asset successfully rolled back to version ${activeVersion.versionName}!`);
+      toast.success(res.message || `Restored ${activeAsset?.displayName} to ${activeVersion.versionName}.`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to restore asset version');
     }
   };
 
-  // Perform split-diff keys comparison
-  const diffComparison = useMemo(() => {
-    if (!activeVersion) return { added: [], deleted: [], modified: [], unchanged: [] };
-    const cur = activeVersion.log.afterSnapshot || {};
-    const prev = previousVersion?.log.afterSnapshot || {};
-
-    const added: string[] = [];
-    const deleted: string[] = [];
-    const modified: string[] = [];
-    const unchanged: string[] = [];
-
-    const allKeys = Array.from(new Set([...Object.keys(cur), ...Object.keys(prev)]));
-
-    allKeys.forEach((key) => {
-      const hasCur = key in cur;
-      const hasPrev = key in prev;
-
-      if (hasCur && !hasPrev) {
-        added.push(key);
-      } else if (!hasCur && hasPrev) {
-        deleted.push(key);
-      } else if (JSON.stringify(cur[key]) !== JSON.stringify(prev[key])) {
-        modified.push(key);
-      } else {
-        unchanged.push(key);
-      }
-    });
-
-    return { added, deleted, modified, unchanged };
-  }, [activeVersion, previousVersion]);
-
-  // Active snapshot columns
   const activeSnapshot = activeVersion?.log.afterSnapshot || {};
   const prevSnapshot = previousVersion?.log.afterSnapshot || {};
+
+  const noAssets = !assetsLoading && assets.length === 0;
 
   return (
     <AppShell>
@@ -181,100 +158,63 @@ export default function VersionHistoryPage() {
       </div>
 
       <PageHeader
-        title="Version History Ledger"
-        description="Tamper-evident chain of asset configurations, transaction logs, and cryptographic state snapshots."
+        title="Version History"
+        description="State snapshots captured at each change. Restoring a version records a RESTORE event and preserves previous history."
         actions={
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground mr-1">Active Asset:</span>
-            <Select
-              value={activeAssetId}
-              onValueChange={(v) => {
-                router.push(`/entities/versions?assetId=${v}`);
-                setSelectedVersionName(null);
-                setCardPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[200px] h-9 text-xs bg-background">
-                <SelectValue placeholder="Select asset" />
-              </SelectTrigger>
-              <SelectContent>
-                {assets.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.displayName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          assets.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground mr-1">Asset:</span>
+              <Select
+                value={activeAssetId}
+                onValueChange={(v) => router.push(`/entities/versions?assetId=${v}`)}
+              >
+                <SelectTrigger className="w-[200px] h-9 text-xs bg-background">
+                  <SelectValue placeholder="Select asset" />
+                </SelectTrigger>
+                <SelectContent>
+                  {assets.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : undefined
         }
       />
 
-      {isLoading ? (
+      {noAssets ? (
+        <EmptyState
+          icon={GitBranch}
+          title="No assets yet"
+          description="Version history is captured per asset. Create an asset first to start recording versions."
+          action={
+            <Button size="sm" onClick={() => router.push('/entities')}>
+              Go to Protected Assets
+            </Button>
+          }
+        />
+      ) : isLoading || assetsLoading ? (
         <div className="py-12 flex justify-center items-center">
           <Clock className="h-8 w-8 text-primary animate-spin" />
         </div>
       ) : versions.length === 0 ? (
         <EmptyState
           icon={GitBranch}
-          title="No Version Logs Available"
-          description="There are no versions recorded for this asset in the ledger."
+          title="No versions recorded"
+          description={`No version snapshots exist for ${activeAsset?.displayName || 'this asset'} yet. Snapshots are captured on every change.`}
         />
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mt-6">
-          {/* ===== Left: Version Timeline Sidebar (5 Cols) ===== */}
+          {/* ===== Left: Version List Sidebar (4 Cols) ===== */}
           <div className="xl:col-span-4 space-y-4">
-            {/* Version Tree branch map visualizer */}
-            <div className="rounded-xl border bg-card p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Version Branch Tree</h3>
-                <Badge variant="outline" className="text-4xs uppercase bg-success/5 border-success/30 text-success">
-                  Active Head
-                </Badge>
-              </div>
-
-              {/* Dynamic SVG Branch Diagram */}
-              <div className="h-14 border rounded-lg bg-muted/10 flex items-center justify-center p-3">
-                <svg className="w-full h-8" overflow="visible">
-                  {/* Branch Line */}
-                  <line x1="20" y1="16" x2="300" y2="16" stroke="hsl(var(--border))" strokeWidth="2" strokeDasharray="3 3" />
-                  <line x1="20" y1="16" x2="160" y2="16" stroke="hsl(var(--primary))" strokeWidth="2" />
-                  
-                  {/* SVG Nodes */}
-                  {versions.slice(0, 4).reverse().map((ver: VersionResponse, idx: number) => {
-                    const cx = 30 + idx * 80;
-                    const isActive = activeVersion?.versionName === ver.versionName;
-                    return (
-                      <g key={ver.versionName} className="cursor-pointer" onClick={() => setSelectedVersionName(ver.versionName)}>
-                        <circle
-                          cx={cx}
-                          cy="16"
-                          r={isActive ? "7" : "5"}
-                          fill={isActive ? "hsl(var(--success))" : "hsl(var(--primary))"}
-                          className="transition-all hover:scale-125"
-                        />
-                        <text
-                          x={cx}
-                          y="32"
-                          textAnchor="middle"
-                          fontSize="9"
-                          fontWeight={isActive ? "bold" : "normal"}
-                          fill={isActive ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))"}
-                        >
-                          {ver.versionName}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-            </div>
-
             {/* Sidebar Search and Filters */}
             <div className="rounded-xl border bg-card p-4 space-y-3">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search version number, steward..."
+                  placeholder="Search version number, actor…"
                   value={searchQuery}
                   onChange={(e) => { setSearchQuery(e.target.value); setCardPage(1); }}
                   className="pl-8 h-8 text-xs"
@@ -335,13 +275,10 @@ export default function VersionHistoryPage() {
                           {ver.log.operation}
                         </Badge>
                       </div>
-                      <span className="text-3xs font-mono text-muted-foreground">
-                        {ver.log.hash.slice(0, 8)}
-                      </span>
                     </div>
 
                     <p className="text-2xs text-muted-foreground mt-2 line-clamp-1">
-                      {ver.log.reason || 'Cryptographic schema modification.'}
+                      {ver.log.reason || 'State snapshot captured.'}
                     </p>
 
                     <div className="flex items-center justify-between gap-2 pt-3 mt-1 border-t border-dashed border-border/60">
@@ -363,7 +300,7 @@ export default function VersionHistoryPage() {
 
               {filteredVersions.length === 0 && (
                 <div className="py-8 text-center text-xs text-muted-foreground border border-dashed rounded-xl">
-                  No matching version cards.
+                  No matching versions.
                 </div>
               )}
             </motion.div>
@@ -396,7 +333,7 @@ export default function VersionHistoryPage() {
             )}
           </div>
 
-          {/* ===== Right: Version Snapshot & Split Comparison Details (8 Cols) ===== */}
+          {/* ===== Right: Version Snapshot & Comparison Details (8 Cols) ===== */}
           <div className="xl:col-span-8 space-y-4">
             {activeVersion && (
               <div className="rounded-xl border bg-card p-5 space-y-5">
@@ -404,9 +341,9 @@ export default function VersionHistoryPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-border/60 gap-4">
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2">
-                      <span className="text-lg font-bold text-foreground">{activeVersion.versionName} Details</span>
-                      <Badge variant="outline" className="border-success/30 bg-success/5 text-success text-2xs py-0 h-5 px-2 font-semibold">
-                        VERIFIED SECURE
+                      <span className="text-lg font-bold text-foreground">{activeVersion.versionName}</span>
+                      <Badge variant="outline" className="text-2xs py-0 h-5 px-2 font-semibold">
+                        {activeVersion.log.operation}
                       </Badge>
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
@@ -417,7 +354,7 @@ export default function VersionHistoryPage() {
                       <span>&bull;</span>
                       <span className="flex items-center gap-1">
                         <User className="h-3 w-3" />
-                        Steward: <strong className="text-foreground">{activeVersion.log.actor.name}</strong>
+                        Modified by: <strong className="text-foreground">{activeVersion.log.actor.name}</strong>
                       </span>
                     </div>
                   </div>
@@ -448,65 +385,28 @@ export default function VersionHistoryPage() {
                   <TabsContent value="preview" className="space-y-4 mt-0">
                     <div className="space-y-3">
                       <div className="flex justify-between items-center text-xs font-semibold text-muted-foreground">
-                        <span>Database Configuration Snapshot</span>
-                        <span className="font-mono">{activeVersion.log.hash.slice(0, 24)}...</span>
+                        <span>Captured State</span>
                       </div>
                       <pre className="bg-muted p-4 rounded-xl border text-xs font-mono overflow-x-auto max-h-[380px] leading-relaxed">
                         {JSON.stringify(activeSnapshot, null, 2)}
                       </pre>
                     </div>
 
-                    {/* Metadata details block */}
-                    <div className="bg-muted/10 p-4 rounded-xl border space-y-3">
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Version Audit Credentials</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        <div className="space-y-2">
-                          <p className="flex justify-between">
-                            <span className="text-muted-foreground">Client Terminal:</span>
-                            <span className="font-medium">macOS &bull; Chrome</span>
-                          </p>
-                          <p className="flex justify-between">
-                            <span className="text-muted-foreground">IP Address:</span>
-                            <span className="font-mono font-medium">{activeVersion.log.ipAddress}</span>
-                          </p>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="flex justify-between">
-                            <span className="text-muted-foreground">Integrity Chain:</span>
-                            <span className="font-semibold text-success flex items-center gap-1">
-                              <ShieldCheck className="h-3.5 w-3.5" /> CRYPTO-SECURE
-                            </span>
-                          </p>
-                          <p className="flex justify-between">
-                            <span className="text-muted-foreground">Parent Hash:</span>
-                            <span className="font-mono text-muted-foreground">{activeVersion.log.previousHash.slice(0, 10)}...</span>
-                          </p>
-                        </div>
-                      </div>
+                    <div className="bg-muted/10 p-4 rounded-xl border text-xs text-muted-foreground">
+                      This snapshot is the asset state stored by the backend at{' '}
+                      {formatDateTime(activeVersion.log.createdAt)}. No per-field change list or
+                      integrity hash is recorded by this platform.
                     </div>
                   </TabsContent>
 
-                  {/* 2. Compare Changes Tab (GitHub-style Split View) */}
+                  {/* 2. Compare Changes Tab (Split View) */}
                   <TabsContent value="compare" className="space-y-4 mt-0">
                     {!previousVersion ? (
                       <div className="py-12 border border-dashed rounded-xl text-center text-sm text-muted-foreground">
-                        This is the initial version (CREATE operation). No previous snapshots exist for delta comparison.
+                        This is the oldest recorded version — there is no earlier snapshot to compare against.
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        {/* Diff summary highlights */}
-                        <div className="flex flex-wrap gap-2 text-2xs font-semibold">
-                          <Badge variant="outline" className="border-success/30 bg-success/5 text-success">
-                            {diffComparison.added.length} Added
-                          </Badge>
-                          <Badge variant="outline" className="border-warning/30 bg-warning/5 text-warning">
-                            {diffComparison.modified.length} Modified
-                          </Badge>
-                          <Badge variant="outline" className="border-destructive/30 bg-destructive/5 text-destructive">
-                            {diffComparison.deleted.length} Deleted
-                          </Badge>
-                        </div>
-
                         {/* GitHub-style Split Grid */}
                         <div className="rounded-xl border overflow-hidden">
                           {/* Split Header */}
@@ -514,18 +414,15 @@ export default function VersionHistoryPage() {
                             <div className="p-2.5 flex items-center gap-1.5 text-muted-foreground">
                               <Clock className="h-3 w-3" />
                               <span>Previous: {previousVersion.versionName}</span>
-                              <span className="font-mono text-3xs">({previousVersion.log.hash.slice(0, 6)})</span>
                             </div>
                             <div className="p-2.5 flex items-center gap-1.5 text-foreground">
                               <Clock className="h-3 w-3 text-primary" />
                               <span>Current: {activeVersion.versionName}</span>
-                              <span className="font-mono text-3xs text-muted-foreground">({activeVersion.log.hash.slice(0, 6)})</span>
                             </div>
                           </div>
 
                           {/* Split Diff Content Body */}
                           <div className="divide-y divide-border/60 bg-card font-mono text-2xs leading-relaxed max-h-[380px] overflow-y-auto">
-                            {/* Diff lines representation */}
                             {Array.from(new Set([...Object.keys(activeSnapshot), ...Object.keys(prevSnapshot)])).map((key) => {
                               const inCur = key in activeSnapshot;
                               const inPrev = key in prevSnapshot;
@@ -590,13 +487,10 @@ export default function VersionHistoryPage() {
                           </div>
                         </div>
 
-                        {/* List of modifications */}
-                        <div className="space-y-2">
-                          <h5 className="text-xs font-semibold text-muted-foreground">Changed Variables List</h5>
-                          <div className="rounded-lg border bg-muted/10 p-1">
-                            <DiffViewer changes={activeVersion.log.fieldChanges} />
-                          </div>
-                        </div>
+                        <p className="text-2xs text-muted-foreground">
+                          Comparison is computed in the browser from the two stored snapshots.
+                          The backend does not record per-field diffs.
+                        </p>
                       </div>
                     )}
                   </TabsContent>
@@ -611,23 +505,25 @@ export default function VersionHistoryPage() {
       <Dialog open={isRestoreOpen} onOpenChange={setIsRestoreOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>Confirm Asset Restore</DialogTitle>
+            <DialogTitle>Restore Version</DialogTitle>
             <DialogDescription>
-              Are you sure you want to restore <strong className="text-foreground">{activeAsset?.displayName}</strong> settings to <strong className="text-foreground">{activeVersion?.versionName}</strong>?
+              Restore <strong className="text-foreground">{activeAsset?.displayName}</strong> to{' '}
+              <strong className="text-foreground">{activeVersion?.versionName}</strong>?
             </DialogDescription>
           </DialogHeader>
           <div className="bg-muted/20 border p-3 rounded-lg text-xs leading-relaxed text-muted-foreground">
-            This will record a RESTORE operation in the immutable cryptochain ledger. The current settings will be backed up as a new history node.
+            The backend applies the snapshot state to the asset, keeps all existing version
+            history, and records a RESTORE operation in the audit log.
           </div>
           <DialogFooter className="pt-2">
             <Button variant="outline" onClick={() => setIsRestoreOpen(false)} disabled={isRestoring}>
               Cancel
             </Button>
-            <Button onClick={triggerRestoreSimulation} disabled={isRestoring}>
+            <Button onClick={handleRestore} disabled={isRestoring}>
               {isRestoring ? (
                 <>
                   <Clock className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  Restoring...
+                  Restoring…
                 </>
               ) : (
                 'Confirm Restore'

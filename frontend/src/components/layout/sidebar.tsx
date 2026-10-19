@@ -6,16 +6,13 @@ import {
   Database,
   GitBranch,
   LayoutDashboard,
-  Plug,
-  ScanSearch,
   ScrollText,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BrandMark } from '@/components/common/brand-mark';
-import { WorkspaceSwitcher } from '@/components/layout/workspace-switcher';
-import { APP_NAME } from '@/lib/constants';
+import { APP_NAME, APP_VERSION } from '@/lib/constants';
 
 interface NavItem {
   label: string;
@@ -26,11 +23,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, description: 'Overview & metrics' },
-  { label: 'Audit Logs', href: '/audit-logs', icon: ScrollText, description: 'Immutable change trail' },
   { label: 'Protected Assets', href: '/entities', icon: Database, description: 'Tracked data sources' },
+  { label: 'Audit Logs', href: '/audit-logs', icon: ScrollText, description: 'Change trail' },
   { label: 'Audit Timeline', href: '/timelines', icon: GitBranch, description: 'Version history' },
-  { label: 'Anomalies', href: '/anomalies', icon: ScanSearch, description: 'AI-detected signals' },
-  { label: 'Integrations', href: '/integrations', icon: Plug, description: 'Connected systems' },
+  { label: 'Settings', href: '/settings', icon: Settings, description: 'Profile & preferences' },
 ];
 
 export function Sidebar() {
@@ -44,7 +40,7 @@ export function Sidebar() {
 
       <nav className="flex-1 overflow-y-auto scrollbar-thin px-3 py-4">
         <p className="px-3 pb-2 text-2xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-          Workspace
+          Navigation
         </p>
         <ul className="space-y-1">
           {navItems.map((item) => {
@@ -77,35 +73,11 @@ export function Sidebar() {
             );
           })}
         </ul>
-
-        <p className="mt-6 px-3 pb-2 text-2xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-          System
-        </p>
-        <ul className="space-y-1">
-          <li>
-            <Link
-              href="/settings"
-              className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-all hover:bg-sidebar-foreground/5 hover:text-sidebar-foreground"
-            >
-              <Settings className="h-4 w-4 shrink-0 text-sidebar-foreground/60 transition-transform group-hover:scale-110" />
-              <span>Settings</span>
-            </Link>
-          </li>
-        </ul>
       </nav>
 
       <div className="border-t border-sidebar-border p-4">
-        <Link
-          href="/dashboard"
-          className="block rounded-lg bg-sidebar-foreground/5 p-3 transition-opacity hover:opacity-80"
-        >
-          <p className="text-2xs font-medium text-sidebar-foreground/80">{APP_NAME}</p>
-          <p className="mt-0.5 text-2xs text-sidebar-foreground/50">Tamper-evident audit v1.0</p>
-          <div className="mt-2 flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse-soft" />
-            <span className="text-2xs text-sidebar-foreground/60">All systems operational</span>
-          </div>
-        </Link>
+        <p className="text-2xs font-medium text-sidebar-foreground/80">{APP_NAME}</p>
+        <p className="mt-0.5 text-2xs text-sidebar-foreground/50">Version {APP_VERSION}</p>
       </div>
     </aside>
   );

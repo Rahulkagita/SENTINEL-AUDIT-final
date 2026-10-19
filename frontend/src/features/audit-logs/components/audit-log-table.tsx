@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { OperationBadge, SeverityBadge, AuditStatusBadge } from '@/components/common/status-badges';
+import { OperationBadge } from '@/components/common/status-badges';
 import { EmptyState } from '@/components/common/empty-state';
 import { TableSkeleton } from '@/components/common/loading-skeletons';
 import { AuditLogDetailDrawer } from '@/features/audit-logs/components/audit-log-detail-drawer';
@@ -104,7 +104,11 @@ export function AuditLogTable() {
         <EmptyState
           icon={ScrollText}
           title="No audit entries found"
-          description="Try adjusting your search or filters to see change records."
+          description={
+            search.trim() || operation !== 'all'
+              ? 'Try adjusting your search or filters to see change records.'
+              : 'Audit entries appear here as soon as assets are created or modified.'
+          }
         />
       ) : (
         <motion.div variants={container} initial="hidden" animate="show">
@@ -115,10 +119,7 @@ export function AuditLogTable() {
                   <TableHead className="text-2xs uppercase tracking-wider">Operation</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Entity</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Actor</TableHead>
-                  <TableHead className="text-2xs uppercase tracking-wider">Severity</TableHead>
-                  <TableHead className="text-2xs uppercase tracking-wider">Status</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Timestamp</TableHead>
-                  <TableHead className="text-2xs uppercase tracking-wider text-right">Hash</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -137,20 +138,11 @@ export function AuditLogTable() {
                         <span className="text-2xs text-muted-foreground">{log.actor.role}</span>
                       </div>
                     </TableCell>
-                    <TableCell><SeverityBadge severity={log.severity} /></TableCell>
-                    <TableCell><AuditStatusBadge status={log.status} /></TableCell>
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="text-sm">{formatRelative(log.createdAt)}</span>
                         <span className="text-2xs text-muted-foreground">{formatDateTime(log.createdAt)}</span>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <code className="font-mono text-2xs text-muted-foreground">
-                        {/* No hash chain is implemented - render an explicit
-                            placeholder instead of a fabricated value. */}
-                        {log.hash ? `${log.hash.slice(0, 10)}…` : '—'}
-                      </code>
                     </TableCell>
                   </motion.tr>
                 ))}

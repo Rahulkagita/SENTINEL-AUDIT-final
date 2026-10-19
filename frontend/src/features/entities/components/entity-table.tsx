@@ -7,7 +7,6 @@ import {
   Plus,
   Search,
   Download,
-  Upload,
   Edit2,
   Trash2,
   Eye,
@@ -15,13 +14,6 @@ import {
   SlidersHorizontal,
   ChevronDown,
   ChevronUp,
-  User,
-  ShieldCheck,
-  ShieldAlert,
-  Loader2,
-  ArrowRight,
-  Sparkles,
-  Lock,
   GitBranch,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -58,7 +50,6 @@ import {
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -85,18 +76,22 @@ import {
   useUpdateEntity,
   useDeleteEntity,
 } from '@/hooks/use-entities';
-import type { Entity, Actor, EntityField } from '@/types';
+import type { Entity } from '@/types';
 
-// Zod Schema for Asset Creation / Editing
+/**
+ * Form schema — only fields the Spring Boot backend actually accepts
+ * (CreateAssetRequest/UpdateAssetRequest): assetName, assetType, status,
+ * department, ownerName, ownerEmail, risk, sourceApplication. The backend
+ * derives the system key from assetType and assigns the version number
+ * itself, so no `name` or `version` inputs are collected here.
+ */
 const assetFormSchema = z.object({
   displayName: z.string().min(2, 'Title must be at least 2 characters'),
-  name: z.string().min(2, 'System key name must be at least 2 characters').regex(/^[a-z_]+$/, 'Must be lowercase letters and underscores only'),
-  category: z.string().min(1, 'Category is required'),
+  assetType: z.string().min(1, 'Type is required'),
   sourceApplication: z.string().min(1, 'Source application is required'),
   department: z.string().min(1, 'Department is required'),
   ownerName: z.string().min(1, 'Owner name is required'),
   ownerEmail: z.string().email('Invalid email address'),
-  version: z.string().regex(/^v\d+\.\d+(\.\d+)?$/, 'Must follow v1.0 or v1.0.0 format'),
   risk: z.enum(['low', 'medium', 'high']),
   status: z.enum(['connected', 'syncing', 'error', 'disconnected']),
 });
@@ -109,31 +104,24 @@ export function ProtectedAssetsTable() {
   const [deptFilter, setDeptFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [riskFilter, setRiskFilter] = useState('all');
-  
+
   // Sort State
   const [sortBy, setSortBy] = useState<keyof Entity>('lastChangedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  
+
   // Pagination State
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  
+
   // Selection State
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  
+
   // Dialog / Drawer States
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [isImportOpen, setIsImportOpen] = useState(false);
-  
   const [activeAsset, setActiveAsset] = useState<Entity | null>(null);
-
-  // Import Simulator State
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importProgress, setImportProgress] = useState(0);
-  const [isImporting, setIsImporting] = useState(false);
 
   // TanStack queries/mutations
   //
@@ -141,12 +129,20 @@ export function ProtectedAssetsTable() {
   // first page a user sees), while GET /api/assets is ZERO-based. The
   // translation happens once in AssetService.list via toApiPage(), so the
   // first visible page always requests page=0 from the backend.
-  const { data, isLoading } = useEntities({ page: 1, pageSize: 100 });
+  const { data, isLoading, isError, error, refetch } = useEntities({ page: 1, pageSize: 100 });
   const createMutation = useCreateEntity();
   const updateMutation = useUpdateEntity();
   const deleteMutation = useDeleteEntity();
 
   const entities: Entity[] = useMemo(() => data?.data ?? [], [data?.data]);
+
+  // Department options are derived from the real loaded rows, so the filter
+  // never offers values that don't exist in the data.
+  const departmentOptions = useMemo(() => {
+    const depts = new Set<string>();
+    entities.forEach((e) => e.department && depts.add(e.department));
+    return Array.from(depts).sort();
+  }, [entities]);
 
   // Filter & Search Logic (local computation for fluid user experience)
   const filteredAssets = useMemo(() => {
@@ -189,13 +185,11 @@ export function ProtectedAssetsTable() {
     resolver: zodResolver(assetFormSchema),
     defaultValues: {
       displayName: '',
-      name: '',
-      category: 'healthcare',
+      assetType: '',
       sourceApplication: '',
-      department: 'Clinical Operations',
+      department: '',
       ownerName: '',
       ownerEmail: '',
-      version: 'v1.0.0',
       risk: 'low',
       status: 'connected',
     },
@@ -249,8 +243,7 @@ export function ProtectedAssetsTable() {
     try {
       await createMutation.mutateAsync({
         assetName: values.displayName,
-        assetType: values.category,
-        description: values.displayName,
+        assetType: values.assetType,
         content: '',
         status: values.status,
         department: values.department,
@@ -259,7 +252,7 @@ export function ProtectedAssetsTable() {
         risk: values.risk,
         sourceApplication: values.sourceApplication,
       } as any);
-      toast.success('Asset connected successfully!');
+      toast.success('Asset created successfully.');
       setIsCreateOpen(false);
       form.reset();
       revealNewAsset();
@@ -274,13 +267,11 @@ export function ProtectedAssetsTable() {
   const handleEditClick = (asset: Entity) => {
     setActiveAsset(asset);
     form.setValue('displayName', asset.displayName);
-    form.setValue('name', asset.name);
-    form.setValue('category', asset.category);
+    form.setValue('assetType', asset.category);
     form.setValue('sourceApplication', asset.sourceApplication);
     form.setValue('department', asset.department);
     form.setValue('ownerName', asset.owner.name);
     form.setValue('ownerEmail', asset.owner.email);
-    form.setValue('version', asset.version);
     form.setValue('risk', asset.risk);
     form.setValue('status', asset.status);
     setIsEditOpen(true);
@@ -288,20 +279,13 @@ export function ProtectedAssetsTable() {
 
   const handleEditSubmit = async (values: AssetFormInput) => {
     if (!activeAsset) return;
-    
-    const updatedActor: Actor = {
-      ...activeAsset.owner,
-      name: values.ownerName,
-      email: values.ownerEmail,
-    };
 
     try {
       await updateMutation.mutateAsync({
         id: activeAsset.id,
         data: {
           assetName: values.displayName,
-          assetType: values.category,
-          description: values.displayName,
+          assetType: values.assetType,
           status: values.status,
           department: values.department,
           ownerName: values.ownerName,
@@ -310,7 +294,7 @@ export function ProtectedAssetsTable() {
           sourceApplication: values.sourceApplication,
         } as any,
       });
-      toast.success('Asset updated successfully!');
+      toast.success('Asset updated successfully.');
       setIsEditOpen(false);
       setActiveAsset(null);
     } catch (err: any) {
@@ -328,7 +312,7 @@ export function ProtectedAssetsTable() {
     if (!activeAsset) return;
     try {
       await deleteMutation.mutateAsync(activeAsset.id);
-      toast.success('Asset deleted successfully!');
+      toast.success('Asset deleted.');
       setIsDeleteOpen(false);
       setActiveAsset(null);
       setSelectedIds(selectedIds.filter((id) => id !== activeAsset.id));
@@ -340,16 +324,16 @@ export function ProtectedAssetsTable() {
   // Bulk Delete
   const handleBulkDelete = async () => {
     try {
-      toast.loading('Deleting selected assets...', { id: 'bulk-del' });
+      toast.loading('Deleting selected assets…', { id: 'bulk-del' });
       await Promise.all(selectedIds.map((id) => deleteMutation.mutateAsync(id)));
-      toast.success('Selected assets deleted successfully!', { id: 'bulk-del' });
+      toast.success('Selected assets deleted.', { id: 'bulk-del' });
       setSelectedIds([]);
     } catch {
       toast.error('Bulk deletion failed', { id: 'bulk-del' });
     }
   };
 
-  // Export selected / all to CSV
+  // Export selected / all to CSV (real client-side export of loaded rows)
   const handleExportCSV = (exportSelected = false) => {
     const assetsToExport = exportSelected
       ? entities.filter((e) => selectedIds.includes(e.id))
@@ -360,11 +344,10 @@ export function ProtectedAssetsTable() {
       return;
     }
 
-    const headers = ['Asset ID', 'Title', 'Record Key', 'Category', 'Source Application', 'Department', 'Owner Name', 'Owner Email', 'Status', 'Version', 'Risk', 'Record Count', 'Change Count', 'Last Changed'];
+    const headers = ['Asset ID', 'Title', 'Type', 'Source Application', 'Department', 'Owner Name', 'Owner Email', 'Status', 'Version', 'Risk', 'Change Count', 'Last Changed'];
     const rows = assetsToExport.map((a) => [
       a.id,
       a.displayName,
-      a.name,
       a.category,
       a.sourceApplication,
       a.department,
@@ -373,7 +356,6 @@ export function ProtectedAssetsTable() {
       a.status,
       a.version,
       a.risk,
-      a.recordCount,
       a.changeCount,
       a.lastChangedAt,
     ]);
@@ -381,7 +363,7 @@ export function ProtectedAssetsTable() {
     const csvContent =
       'data:text/csv;charset=utf-8,' +
       [headers.join(','), ...rows.map((r) => r.map((cell) => `"${cell}"`).join(','))].join('\n');
-    
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
@@ -389,60 +371,22 @@ export function ProtectedAssetsTable() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success(`Successfully exported ${assetsToExport.length} assets to CSV!`);
+    toast.success(`Exported ${assetsToExport.length} assets to CSV.`);
   };
 
-  // Simulated CSV Import
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setImportFile(e.target.files[0]);
-    }
-  };
-
-  const triggerImportSimulation = async () => {
-    if (!importFile) {
-      toast.error('Please select a CSV schema file to import.');
-      return;
-    }
-    setIsImporting(true);
-    setImportProgress(0);
-
-    // Simulate progress ticks
-    for (let p = 10; p <= 100; p += 15) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      setImportProgress(Math.min(p, 100));
-    }
-
-    try {
-      // Create a mock asset from file metadata
-      const cleanName = importFile.name.replace(/\.[^/.]+$/, '').toLowerCase().replace(/[^a-z0-9_]/g, '_');
-      await createMutation.mutateAsync({
-        name: cleanName,
-        displayName: importFile.name.replace(/\.[^/.]+$/, ''),
-        category: 'custom',
-        sourceApplication: 'Imported CSV Upload',
-        department: 'Operations',
-        owner: { id: 'u-imp', name: 'System Auto-Import', email: 'audit@acme.com', role: 'System Admin' },
-        status: 'connected',
-        version: 'v1.0.0',
-        risk: 'low',
-        schema: [
-          { key: 'id', label: 'Record ID', type: 'string', sensitive: false },
-          { key: 'imported_value', label: 'Imported Field', type: 'string', sensitive: false },
-        ],
-      });
-
-      toast.success(`Successfully connected asset "${importFile.name}"!`);
-      setIsImportOpen(false);
-      setImportFile(null);
-      revealNewAsset();
-    } catch {
-      toast.error('Failed to import asset schema.');
-    } finally {
-      setIsImporting(false);
-      setImportProgress(0);
-    }
-  };
+  if (isError) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center space-y-2">
+        <p className="text-sm font-semibold text-foreground">Failed to load assets</p>
+        <p className="text-xs text-muted-foreground">
+          {error instanceof Error ? error.message : 'The asset list request could not be completed.'}
+        </p>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -464,12 +408,6 @@ export function ProtectedAssetsTable() {
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* CSV Import */}
-          <Button variant="outline" size="sm" onClick={() => setIsImportOpen(true)}>
-            <Upload className="mr-2 h-4 w-4" />
-            Import CSV Schema
-          </Button>
-
           {/* Export options */}
           <Button variant="outline" size="sm" onClick={() => handleExportCSV(false)}>
             <Download className="mr-2 h-4 w-4" />
@@ -479,7 +417,7 @@ export function ProtectedAssetsTable() {
           {/* Track Asset */}
           <Button size="sm" onClick={() => { form.reset(); setIsCreateOpen(true); }}>
             <Plus className="mr-2 h-4 w-4" />
-            Connect Asset
+            Create Asset
           </Button>
         </div>
       </div>
@@ -488,21 +426,19 @@ export function ProtectedAssetsTable() {
       <div className="flex flex-wrap items-center gap-3 bg-muted/40 p-3 rounded-lg border border-border/60">
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground mr-2">
           <SlidersHorizontal className="h-3.5 w-3.5" />
-          <span>Advanced Filters:</span>
+          <span>Filters:</span>
         </div>
 
-        {/* Dept Filter */}
+        {/* Dept Filter — options derived from real data */}
         <Select value={deptFilter} onValueChange={(v) => { setDeptFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-[160px] h-8 text-xs bg-background">
+          <SelectTrigger className="w-[180px] h-8 text-xs bg-background">
             <SelectValue placeholder="Department" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Departments</SelectItem>
-            <SelectItem value="Clinical Operations">Clinical Operations</SelectItem>
-            <SelectItem value="Finance">Finance</SelectItem>
-            <SelectItem value="Education">Education</SelectItem>
-            <SelectItem value="Compliance">Compliance</SelectItem>
-            <SelectItem value="Human Resources">Human Resources</SelectItem>
+            {departmentOptions.map((dept) => (
+              <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -545,7 +481,7 @@ export function ProtectedAssetsTable() {
           >
             <div className="flex items-center gap-2">
               <span className="font-semibold text-accent">{selectedIds.length}</span>
-              <span>assets selected for bulk updates</span>
+              <span>assets selected</span>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -577,8 +513,20 @@ export function ProtectedAssetsTable() {
       ) : filteredAssets.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="No assets matching filters"
-          description="Try modifying search keywords or switching workspace filters."
+          title={entities.length === 0 ? 'No assets yet' : 'No assets matching filters'}
+          description={
+            entities.length === 0
+              ? 'Create your first asset to start recording changes and version history.'
+              : 'Try modifying the search keywords or clearing the filters.'
+          }
+          action={
+            entities.length === 0 ? (
+              <Button size="sm" onClick={() => { form.reset(); setIsCreateOpen(true); }}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Asset
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <div className="space-y-4">
@@ -595,19 +543,19 @@ export function ProtectedAssetsTable() {
                     />
                   </TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Asset ID</TableHead>
-                  <TableHead className="text-2xs className cursor-pointer select-none" onClick={() => handleSort('displayName')}>
+                  <TableHead className="text-2xs cursor-pointer select-none" onClick={() => handleSort('displayName')}>
                     <span className="flex items-center gap-1">
                       Title
                       {sortBy === 'displayName' && (sortOrder === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
                     </span>
                   </TableHead>
-                  <TableHead className="text-2xs uppercase tracking-wider">Record Type</TableHead>
+                  <TableHead className="text-2xs uppercase tracking-wider">Type</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Department</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Owner</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Status</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Version</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Risk</TableHead>
-                  <TableHead className="text-2xs className cursor-pointer select-none" onClick={() => handleSort('lastChangedAt')}>
+                  <TableHead className="text-2xs cursor-pointer select-none" onClick={() => handleSort('lastChangedAt')}>
                     <span className="flex items-center gap-1">
                       Last Modified
                       {sortBy === 'lastChangedAt' && (sortOrder === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
@@ -644,7 +592,7 @@ export function ProtectedAssetsTable() {
                         {asset.displayName}
                       </TableCell>
 
-                      {/* Record Type / Category */}
+                      {/* Type */}
                       <TableCell className="capitalize text-xs font-semibold text-muted-foreground">
                         {asset.category}
                       </TableCell>
@@ -674,11 +622,11 @@ export function ProtectedAssetsTable() {
                           <span
                             className={`h-1.5 w-1.5 rounded-full ${
                               asset.status === 'connected'
-                                ? 'bg-success animate-pulse-soft'
+                                ? 'bg-success'
                                 : asset.status === 'syncing'
                                 ? 'bg-accent animate-pulse-soft'
                                 : asset.status === 'error'
-                                ? 'bg-destructive animate-pulse-soft'
+                                ? 'bg-destructive'
                                 : 'bg-muted-foreground'
                             }`}
                           />
@@ -806,9 +754,10 @@ export function ProtectedAssetsTable() {
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>Connect Database Asset</DialogTitle>
+            <DialogTitle>Create Asset</DialogTitle>
             <DialogDescription>
-              Link a new enterprise schema or table data source into the cryptochain ledger.
+              Register a new data asset. Every change to it will be recorded in the audit log
+              with version history.
             </DialogDescription>
           </DialogHeader>
 
@@ -820,7 +769,7 @@ export function ProtectedAssetsTable() {
                   name="displayName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Asset Display Title</FormLabel>
+                      <FormLabel>Asset Name</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. Invoices Ledger" {...field} />
                       </FormControl>
@@ -831,54 +780,12 @@ export function ProtectedAssetsTable() {
 
                 <FormField
                   control={form.control}
-                  name="name"
+                  name="assetType"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Database Key</FormLabel>
+                      <FormLabel>Type</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. invoices_ledger" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="category"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Record Type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="healthcare">Healthcare EHR</SelectItem>
-                          <SelectItem value="banking">Banking Ledger</SelectItem>
-                          <SelectItem value="education">Education Records</SelectItem>
-                          <SelectItem value="insurance">Insurance Docs</SelectItem>
-                          <SelectItem value="hrms">HR Employee Records</SelectItem>
-                          <SelectItem value="custom">Custom Application</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="sourceApplication"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Source System</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. SAP Server" {...field} />
+                        <Input placeholder="e.g. database, table, file" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -888,24 +795,27 @@ export function ProtectedAssetsTable() {
 
               <FormField
                 control={form.control}
+                name="sourceApplication"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Source System</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Billing Service" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name="department"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Department Ownership</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select department" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="Clinical Operations">Clinical Operations</SelectItem>
-                        <SelectItem value="Finance">Finance</SelectItem>
-                        <SelectItem value="Education">Education</SelectItem>
-                        <SelectItem value="Compliance">Compliance</SelectItem>
-                        <SelectItem value="Human Resources">Human Resources</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Department</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Finance" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -917,7 +827,7 @@ export function ProtectedAssetsTable() {
                   name="ownerName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Steward Name</FormLabel>
+                      <FormLabel>Owner Name</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. Sarah Chen" {...field} />
                       </FormControl>
@@ -931,7 +841,7 @@ export function ProtectedAssetsTable() {
                   name="ownerEmail"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Steward Email</FormLabel>
+                      <FormLabel>Owner Email</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. s.chen@acme.com" {...field} />
                       </FormControl>
@@ -941,27 +851,13 @@ export function ProtectedAssetsTable() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <FormField
-                  control={form.control}
-                  name="version"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Version</FormLabel>
-                      <FormControl>
-                        <Input placeholder="v1.0.0" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
+              <div className="grid grid-cols-2 gap-2">
                 <FormField
                   control={form.control}
                   name="risk"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Threat Risk</FormLabel>
+                      <FormLabel>Risk</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -969,9 +865,9 @@ export function ProtectedAssetsTable() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="low">Low Risk</SelectItem>
+                          <SelectItem value="low">Low</SelectItem>
                           <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="high">High Risk</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -1009,7 +905,7 @@ export function ProtectedAssetsTable() {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createMutation.isPending}>
-                  {createMutation.isPending ? 'Connecting...' : 'Connect Database Asset'}
+                  {createMutation.isPending ? 'Creating…' : 'Create Asset'}
                 </Button>
               </DialogFooter>
             </form>
@@ -1021,9 +917,10 @@ export function ProtectedAssetsTable() {
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>Edit Database Asset</DialogTitle>
+            <DialogTitle>Edit Asset</DialogTitle>
             <DialogDescription>
-              Modify connection parameters or ownership attributes for this protected asset.
+              Update the metadata for this asset. The change is recorded in the audit log and
+              creates a new version.
             </DialogDescription>
           </DialogHeader>
 
@@ -1035,7 +932,7 @@ export function ProtectedAssetsTable() {
                   name="displayName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Asset Display Title</FormLabel>
+                      <FormLabel>Asset Name</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. Invoices Ledger" {...field} />
                       </FormControl>
@@ -1046,54 +943,12 @@ export function ProtectedAssetsTable() {
 
                 <FormField
                   control={form.control}
-                  name="name"
+                  name="assetType"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Database Key</FormLabel>
+                      <FormLabel>Type</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. invoices_ledger" {...field} disabled />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="category"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Record Type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="healthcare">Healthcare EHR</SelectItem>
-                          <SelectItem value="banking">Banking Ledger</SelectItem>
-                          <SelectItem value="education">Education Records</SelectItem>
-                          <SelectItem value="insurance">Insurance Docs</SelectItem>
-                          <SelectItem value="hrms">HR Employee Records</SelectItem>
-                          <SelectItem value="custom">Custom Application</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="sourceApplication"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Source System</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. SAP Server" {...field} />
+                        <Input placeholder="e.g. database, table, file" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -1103,24 +958,27 @@ export function ProtectedAssetsTable() {
 
               <FormField
                 control={form.control}
+                name="sourceApplication"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Source System</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Billing Service" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name="department"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Department Ownership</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select department" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="Clinical Operations">Clinical Operations</SelectItem>
-                        <SelectItem value="Finance">Finance</SelectItem>
-                        <SelectItem value="Education">Education</SelectItem>
-                        <SelectItem value="Compliance">Compliance</SelectItem>
-                        <SelectItem value="Human Resources">Human Resources</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Department</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Finance" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -1132,7 +990,7 @@ export function ProtectedAssetsTable() {
                   name="ownerName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Steward Name</FormLabel>
+                      <FormLabel>Owner Name</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. Sarah Chen" {...field} />
                       </FormControl>
@@ -1146,7 +1004,7 @@ export function ProtectedAssetsTable() {
                   name="ownerEmail"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Steward Email</FormLabel>
+                      <FormLabel>Owner Email</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. s.chen@acme.com" {...field} />
                       </FormControl>
@@ -1156,27 +1014,13 @@ export function ProtectedAssetsTable() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <FormField
-                  control={form.control}
-                  name="version"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Version</FormLabel>
-                      <FormControl>
-                        <Input placeholder="v1.0.0" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
+              <div className="grid grid-cols-2 gap-2">
                 <FormField
                   control={form.control}
                   name="risk"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Threat Risk</FormLabel>
+                      <FormLabel>Risk</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -1184,9 +1028,9 @@ export function ProtectedAssetsTable() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="low">Low Risk</SelectItem>
+                          <SelectItem value="low">Low</SelectItem>
                           <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="high">High Risk</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -1224,7 +1068,7 @@ export function ProtectedAssetsTable() {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={updateMutation.isPending}>
-                  {updateMutation.isPending ? 'Updating...' : 'Update Settings'}
+                  {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
                 </Button>
               </DialogFooter>
             </form>
@@ -1236,10 +1080,11 @@ export function ProtectedAssetsTable() {
       <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Disconnect Protected Asset?</AlertDialogTitle>
+            <AlertDialogTitle>Delete Asset?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to disconnect <strong className="text-foreground">{activeAsset?.displayName}</strong>? 
-              This will pause real-time tamper evidence logging for this data source. All current hashes in the cryptochain ledger will remain read-only.
+              Are you sure you want to delete <strong className="text-foreground">{activeAsset?.displayName}</strong>?
+              The asset is soft-deleted on the backend and a DELETE event is recorded in the audit
+              log. Existing audit entries and version history are preserved.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1248,81 +1093,19 @@ export function ProtectedAssetsTable() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleDeleteSubmit}
             >
-              Disconnect Asset
+              Delete Asset
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ===== 8. Import CSV Schema Dialog ===== */}
-      <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
-            <DialogTitle>Import Asset Schema</DialogTitle>
-            <DialogDescription>
-              Upload a structured CSV file representing database tables and fields to immediately track updates.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-6 bg-muted/10 text-center hover:bg-muted/20 transition-all cursor-pointer relative">
-              <input
-                type="file"
-                accept=".csv"
-                className="absolute inset-0 opacity-0 cursor-pointer"
-                onChange={handleFileChange}
-                disabled={isImporting}
-              />
-              <FileText className="h-10 w-10 text-muted-foreground mb-2" />
-              <p className="text-xs font-semibold text-foreground">
-                {importFile ? importFile.name : 'Select or drop CSV schema file'}
-              </p>
-              <p className="text-3xs text-muted-foreground mt-1">
-                CSV files must map table headers to database variables
-              </p>
-            </div>
-
-            {isImporting && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Importing schema components...</span>
-                  <span>{importProgress}%</span>
-                </div>
-                <div className="h-1 w-full bg-muted overflow-hidden rounded-full">
-                  <div
-                    className="h-full bg-accent transition-all duration-150"
-                    style={{ width: `${importProgress}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsImportOpen(false)} disabled={isImporting}>
-              Cancel
-            </Button>
-            <Button onClick={triggerImportSimulation} disabled={!importFile || isImporting}>
-              {isImporting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading...
-                </>
-              ) : (
-                'Import Schema'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ===== 9. Asset Details Sheet (Drawer) ===== */}
+      {/* ===== 8. Asset Details Sheet (Drawer) ===== */}
       <Sheet open={isDetailOpen} onOpenChange={setIsDetailOpen}>
         <SheetContent className="w-full sm:max-w-[480px] overflow-y-auto bg-card border-l border-border shadow-md">
           <SheetHeader className="pb-4 border-b border-border">
             <div className="flex items-center justify-between">
               <span className="text-3xs uppercase tracking-widest text-muted-foreground font-semibold">
-                Protected Asset Details
+                Asset Details
               </span>
               <Badge
                 variant="outline"
@@ -1339,35 +1122,33 @@ export function ProtectedAssetsTable() {
             </div>
             <SheetTitle className="text-xl font-bold mt-2">{activeAsset?.displayName}</SheetTitle>
             <SheetDescription className="font-mono text-2xs text-muted-foreground">
-              Internal Key: {activeAsset?.name} &bull; ID: {activeAsset?.id}
+              ID: {activeAsset?.id}
             </SheetDescription>
           </SheetHeader>
 
           {activeAsset && (
             <div className="space-y-6 pt-6">
-              {/* Connection Status card */}
+              {/* Status card */}
               <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-muted-foreground">Connection Integrity</span>
+                  <span className="text-xs font-semibold text-muted-foreground">Status</span>
                   <div className="flex items-center gap-1.5">
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
                         activeAsset.status === 'connected'
-                          ? 'bg-success animate-pulse-soft'
+                          ? 'bg-success'
                           : activeAsset.status === 'syncing'
                           ? 'bg-accent animate-pulse-soft'
-                          : 'bg-destructive'
+                          : activeAsset.status === 'error'
+                          ? 'bg-destructive'
+                          : 'bg-muted-foreground'
                       }`}
                     />
                     <span className="text-xs capitalize font-semibold">{activeAsset.status}</span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 text-center pt-2">
-                  <div className="bg-background rounded-lg p-2 border">
-                    <p className="text-3xs text-muted-foreground uppercase font-semibold">Records</p>
-                    <p className="text-sm font-bold mt-0.5">{activeAsset.recordCount.toLocaleString()}</p>
-                  </div>
+                <div className="grid grid-cols-2 gap-2 text-center pt-2">
                   <div className="bg-background rounded-lg p-2 border">
                     <p className="text-3xs text-muted-foreground uppercase font-semibold">Changes</p>
                     <p className="text-sm font-bold text-primary mt-0.5">{activeAsset.changeCount.toLocaleString()}</p>
@@ -1382,57 +1163,33 @@ export function ProtectedAssetsTable() {
               {/* Metadata details */}
               <div className="space-y-3">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Asset Infrastructure
+                  Metadata
                 </h4>
                 <div className="divide-y divide-border rounded-xl border bg-background text-sm">
                   <div className="flex justify-between p-3">
-                    <span className="text-muted-foreground">Source Application</span>
+                    <span className="text-muted-foreground">Type</span>
+                    <span className="font-medium capitalize">{activeAsset.category}</span>
+                  </div>
+                  <div className="flex justify-between p-3">
+                    <span className="text-muted-foreground">Source System</span>
                     <span className="font-medium">{activeAsset.sourceApplication}</span>
                   </div>
                   <div className="flex justify-between p-3">
-                    <span className="text-muted-foreground">Ownership Department</span>
+                    <span className="text-muted-foreground">Department</span>
                     <span className="font-medium">{activeAsset.department}</span>
                   </div>
                   <div className="flex justify-between p-3">
-                    <span className="text-muted-foreground">Primary Administrator</span>
+                    <span className="text-muted-foreground">Owner</span>
                     <span className="font-medium">{activeAsset.owner.name} ({activeAsset.owner.email})</span>
                   </div>
                   <div className="flex justify-between p-3">
-                    <span className="text-muted-foreground">Linked Ledger Block</span>
-                    <span className="font-mono text-xs text-muted-foreground">hash-chain-v1</span>
+                    <span className="text-muted-foreground">Created</span>
+                    <span className="font-medium text-xs">{activeAsset.createdAt ? new Date(activeAsset.createdAt).toLocaleString() : '—'}</span>
                   </div>
-                </div>
-              </div>
-
-              {/* Schema Fields list */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Tracked Database Fields
-                  </h4>
-                  <span className="text-2xs text-muted-foreground">{activeAsset.schema.length} fields</span>
-                </div>
-
-                <div className="divide-y divide-border rounded-xl border bg-background overflow-hidden">
-                  {activeAsset.schema.map((field) => (
-                    <div key={field.key} className="flex items-center justify-between p-3 hover:bg-muted/10">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-xs text-foreground">{field.label}</span>
-                        <code className="font-mono text-3xs text-muted-foreground">({field.key})</code>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Badge variant="outline" className="text-3xs font-mono py-0 font-normal">
-                          {field.type}
-                        </Badge>
-                        {field.sensitive && (
-                          <Badge variant="secondary" className="text-4xs font-bold gap-1 bg-warning/10 text-warning hover:bg-warning/15 border-transparent py-0">
-                            <Lock className="h-2.5 w-2.5" />
-                            SENSITIVE
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                  <div className="flex justify-between p-3">
+                    <span className="text-muted-foreground">Last Modified</span>
+                    <span className="font-medium text-xs">{new Date(activeAsset.lastChangedAt).toLocaleString()}</span>
+                  </div>
                 </div>
               </div>
             </div>

@@ -5,13 +5,13 @@ import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
 
 export const metadata: Metadata = {
   title: {
-    default: `${APP_NAME} — Universal Change Intelligence`,
+    default: `${APP_NAME} — Audit Trail & Version History`,
     template: `%s · ${APP_NAME}`,
   },
   description: APP_DESCRIPTION,
   applicationName: APP_NAME,
   authors: [{ name: APP_NAME }],
-  keywords: ['audit trail', 'change intelligence', 'tamper-evident', 'compliance', 'data governance'],
+  keywords: ['audit trail', 'change log', 'version history', 'data governance'],
   openGraph: {
     title: APP_NAME,
     description: APP_DESCRIPTION,

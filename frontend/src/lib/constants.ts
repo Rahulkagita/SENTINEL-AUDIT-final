@@ -1,10 +1,7 @@
-export const APP_NAME = 'SentinelAudit AI';
-export const APP_TAGLINE = 'Universal Tamper-Evident Change Intelligence';
+export const APP_NAME = 'SentinelAudit';
+export const APP_TAGLINE = 'Audit trail & version history for your data assets';
 export const APP_DESCRIPTION =
-  'Track every change to sensitive data across any business application — with an immutable, AI-assisted audit trail.';
-
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api';
+  'Track create, update, and delete operations across your data assets with a searchable audit log and version history.';
 
 export const APP_VERSION = '1.0.0';
 
@@ -13,18 +10,9 @@ export const QUERY_KEYS = {
   auditLog: (id: string) => ['audit-logs', id],
   entities: ['entities'],
   entity: (id: string) => ['entities', id],
-  entityRecords: (id: string) => ['entities', id, 'records'],
   timelines: ['timelines'],
-  timeline: (id: string) => ['timelines', id],
-  anomalies: ['anomalies'],
-  anomaly: (id: string) => ['anomalies', id],
-  integrations: ['integrations'],
-  integration: (id: string) => ['integrations', id],
   dashboard: ['dashboard'],
-  dashboardMetrics: ['dashboard', 'metrics'],
-  users: ['users'],
-  user: (id: string) => ['users', id],
-};
+} as const;
 
 export const DEFAULT_QUERY_OPTIONS = {
   staleTime: 30 * 1000,
@@ -39,12 +27,3 @@ export const PAGINATION_DEFAULTS = {
   sort: 'createdAt',
   order: 'desc' as const,
 };
-
-export const NAV_ITEMS = [
-  { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
-  { label: 'Audit Logs', href: '/audit-logs', icon: 'ScrollText' },
-  { label: 'Protected Assets', href: '/entities', icon: 'Database' },
-  { label: 'Audit Timeline', href: '/timelines', icon: 'GitBranch' },
-  { label: 'Anomalies', href: '/anomalies', icon: 'ScanSearch' },
-  { label: 'Integrations', href: '/integrations', icon: 'Plug' },
-] as const;

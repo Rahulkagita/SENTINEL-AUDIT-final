@@ -45,14 +45,10 @@ async function request<T>(
   const { params, headers, body, ...rest } = options;
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('sentinel_audit_token') : null;
-  const workspaceId = typeof window !== 'undefined' ? localStorage.getItem('sentinel_active_workspace') : null;
-  
+
   const authHeaders: Record<string, string> = {};
   if (token) {
     authHeaders['Authorization'] = `Bearer ${token}`;
-  }
-  if (workspaceId) {
-    authHeaders['X-Workspace-Id'] = workspaceId;
   }
 
   const response = await fetch(buildUrl(path, params), {
