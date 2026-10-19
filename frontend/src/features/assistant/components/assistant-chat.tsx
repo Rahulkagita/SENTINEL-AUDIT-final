@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -14,6 +14,7 @@ import {
   ScrollText,
   Send,
   Sparkles,
+  X,
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -61,12 +62,49 @@ function errorMessage(error: unknown): string {
     if (error.statusCode === 503) {
       return 'The assistant is unavailable right now — it may not be configured on this server. Please try again later.';
     }
+    if (error.statusCode >= 500) {
+      return 'The backend is unavailable right now. Please try again shortly.';
+    }
     return error.message || 'Something went wrong. Please try again.';
+  }
+  // fetch() rejects with a TypeError when the backend cannot be reached at all.
+  if (error instanceof TypeError) {
+    return 'Could not reach the SentinelAudit backend. Please check that the server is running and try again.';
   }
   return 'Something went wrong. Please try again.';
 }
 
-export function AssistantChat() {
+type AssistantChatVariant = 'page' | 'floating';
+
+interface AssistantChatProps {
+  /** Heading rendered in the header. */
+  title?: string;
+  /** Subtitle under the heading; pass null to hide it (floating panel). */
+  description?: ReactNode;
+  /**
+   * 'page' sizes to its content (the standalone /assistant page).
+   * 'floating' fills the right-anchored chat panel.
+   */
+  variant?: AssistantChatVariant;
+  /** Renders a close control in the header (used by the floating panel). */
+  onClose?: () => void;
+  /** Extra classes merged into the root card. */
+  className?: string;
+}
+
+const DEFAULT_TITLE = 'SentinelAudit Assistant';
+const DEFAULT_DESCRIPTION =
+  'Read-only answers grounded in the project documentation and live audit data. It cannot change anything.';
+
+export function AssistantChat({
+  title = DEFAULT_TITLE,
+  description,
+  variant = 'page',
+  onClose,
+  className,
+}: AssistantChatProps) {
+  const isFloating = variant === 'floating';
+  const subtitle = description !== undefined ? description : DEFAULT_DESCRIPTION;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
@@ -168,36 +206,80 @@ export function AssistantChat() {
   };
 
   return (
-    <Card className="flex flex-col overflow-hidden">
-      <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 border-b">
-        <div className="space-y-1">
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" aria-hidden="true" />
-            SentinelAudit Assistant
+    <Card
+      className={cn(
+        'flex flex-col overflow-hidden',
+        isFloating && 'h-full rounded-none border-0 shadow-none',
+        className,
+      )}
+    >
+      <CardHeader
+        className={cn(
+          'flex-row items-start justify-between gap-4 space-y-0 border-b',
+          isFloating && 'gap-3 px-4 py-3',
+        )}
+      >
+        <div className="min-w-0 space-y-1">
+          <CardTitle className={cn('flex items-center gap-2', isFloating && 'text-base')}>
+            <Sparkles
+              className={cn('shrink-0 text-primary', isFloating ? 'h-4 w-4' : 'h-5 w-5')}
+              aria-hidden="true"
+            />
+            <span className="truncate">{title}</span>
           </CardTitle>
-          <CardDescription>
-            Read-only answers grounded in the project documentation and live audit data. It cannot
-            change anything.
-          </CardDescription>
+          {subtitle ? (
+            <CardDescription className={isFloating ? 'text-xs' : undefined}>
+              {subtitle}
+            </CardDescription>
+          ) : null}
+          <AssistantStatusIndicator status={status} />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={reset}
-          disabled={messages.length === 0}
-          className="shrink-0"
-        >
-          <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-          New conversation
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {isFloating ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={reset}
+              disabled={messages.length === 0}
+              className="h-8 w-8"
+              aria-label="New conversation"
+              title="New conversation"
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={reset}
+              disabled={messages.length === 0}
+              className="shrink-0"
+            >
+              <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+              New conversation
+            </Button>
+          )}
+          {onClose ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="h-8 w-8"
+              aria-label="Close assistant"
+              title="Close assistant"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4 p-0">
+      <CardContent className={cn('flex flex-col gap-4 p-0', isFloating && 'min-h-0 flex-1')}>
         {status.data && !status.data.configured ? (
-          <div className="px-6 pt-4">
+          <div className={cn('pt-4', isFloating ? 'px-4' : 'px-6')}>
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-              <AlertTitle>Assistant is not configured</AlertTitle>
+              <AlertTitle>AI provider not configured</AlertTitle>
               <AlertDescription>
                 No model provider is configured on this server, so questions cannot be answered yet.
                 You can still browse the rest of the app.
@@ -208,7 +290,12 @@ export function AssistantChat() {
 
         <div
           ref={scrollRef}
-          className="scrollbar-thin min-h-[320px] max-h-[58vh] flex-1 space-y-5 overflow-y-auto px-6 py-4"
+          className={cn(
+            'scrollbar-thin space-y-5 overflow-y-auto',
+            isFloating
+              ? 'min-h-0 flex-1 px-4 py-4'
+              : 'min-h-[320px] max-h-[58vh] flex-1 px-6 py-4',
+          )}
           role="log"
           aria-live="polite"
           aria-label="Assistant conversation"
@@ -243,7 +330,7 @@ export function AssistantChat() {
           ) : null}
         </div>
 
-        <div className="border-t px-6 py-4">
+        <div className={cn('shrink-0 border-t', isFloating ? 'px-4 py-3' : 'px-6 py-4')}>
           <div className="flex items-end gap-2">
             <Textarea
               value={input}
@@ -277,6 +364,49 @@ export function AssistantChat() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Honest readiness chip: it reflects the real `/api/assistant/status` response
+ * (or its failure). It reports "Online" only when the backend says a provider
+ * is configured — never optimistically.
+ */
+function AssistantStatusIndicator({
+  status,
+}: {
+  status: ReturnType<typeof useAssistantStatus>;
+}) {
+  if (status.isPending) {
+    return (
+      <span className="flex items-center gap-1.5 text-2xs text-muted-foreground" role="status">
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+        Checking assistant status…
+      </span>
+    );
+  }
+
+  if (status.isError) {
+    const sessionExpired =
+      status.error instanceof HttpClientError && status.error.statusCode === 401;
+    return (
+      <span className="flex items-center gap-1.5 text-2xs text-destructive" role="status">
+        <span className="h-2 w-2 rounded-full bg-destructive" aria-hidden="true" />
+        {sessionExpired ? 'Session expired' : 'Backend unavailable'}
+      </span>
+    );
+  }
+
+  const configured = status.data?.configured === true;
+
+  return (
+    <span className="flex items-center gap-1.5 text-2xs text-muted-foreground" role="status">
+      <span
+        className={cn('h-2 w-2 rounded-full', configured ? 'bg-success' : 'bg-warning')}
+        aria-hidden="true"
+      />
+      {configured ? 'Online' : 'AI provider not configured'}
+    </span>
   );
 }
 

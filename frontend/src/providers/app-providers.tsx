@@ -1,12 +1,10 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { ThemeProvider } from 'next-themes';
 import { useState, type ReactNode } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { createQueryClient } from '@/lib/query-client';
-import { env } from '@/lib/env';
 
 import { AuthProvider } from '@/providers/auth-provider';
 
@@ -25,9 +23,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
           {children}
         </AuthProvider>
         <Toaster richColors position="top-right" />
-        {env.isDevelopment ? (
-          <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-left" />
-        ) : null}
+        {/* React Query Devtools were removed from the user-facing UI on purpose;
+            QueryClientProvider (and all React Query behaviour) stays untouched. */}
       </QueryClientProvider>
     </ThemeProvider>
   );

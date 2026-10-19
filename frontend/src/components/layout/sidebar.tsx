@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   ScrollText,
   Settings,
-  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -27,7 +26,6 @@ const navItems: NavItem[] = [
   { label: 'Protected Assets', href: '/entities', icon: Database, description: 'Tracked data sources' },
   { label: 'Audit Logs', href: '/audit-logs', icon: ScrollText, description: 'Change trail' },
   { label: 'Audit Timeline', href: '/timelines', icon: GitBranch, description: 'Version history' },
-  { label: 'Assistant', href: '/assistant', icon: Sparkles, description: 'Ask about your data' },
   { label: 'Settings', href: '/settings', icon: Settings, description: 'Profile & preferences' },
 ];
 

@@ -3,6 +3,7 @@
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { ProtectedRoute } from '@/features/auth/components/protected-route';
+import { FloatingAssistant } from '@/features/assistant/components/floating-assistant';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -18,6 +19,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </main>
         </div>
       </div>
+      {/* Global assistant: every authenticated page that renders the shell gets
+          the same floating entry point. ProtectedRoute guarantees it never
+          renders for signed-out visitors (login/register/etc.). */}
+      <FloatingAssistant />
     </ProtectedRoute>
   );
 }
