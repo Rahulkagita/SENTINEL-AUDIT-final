@@ -12,6 +12,7 @@ export const QUERY_KEYS = {
   entity: (id: string) => ['entities', id],
   timelines: ['timelines'],
   dashboard: ['dashboard'],
+  assistantStatus: ['assistant', 'status'],
 } as const;
 
 export const DEFAULT_QUERY_OPTIONS = {

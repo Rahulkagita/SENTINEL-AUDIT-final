@@ -89,9 +89,9 @@ export function DashboardActivityFeed() {
                     {new Date(event.timestamp).toLocaleString()}
                   </p>
                   <Button asChild variant="ghost" size="icon">
-                    <Link href={`/audit-logs?search=${event.id}`}>
+                    <Link href={`/audit-logs?search=${event.assetId}`}>
                       <Eye className="h-4 w-4" />
-                      <span className="sr-only">View in audit logs</span>
+                      <span className="sr-only">View this asset's events in audit logs</span>
                     </Link>
                   </Button>
                 </div>

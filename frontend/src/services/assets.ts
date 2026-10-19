@@ -7,12 +7,12 @@ export type CreateAssetDto = Omit<Entity, 'id' | 'createdAt' | 'lastChangedAt' |
 export type UpdateAssetDto = Partial<Entity>;
 
 /**
- * GET /api/assets only understands `page` (ZERO-based) and `pageSize`.
- * Everything else the UI keeps locally (search/status/category filters and
- * the client-side page slicing) — the list endpoint has no server-side
- * filtering, so sending it would be a pretend parameter.
+ * GET /api/assets understands `page` (ZERO-based), `pageSize`, and the
+ * server-side filters `search`, `department`, `status` and `risk`. Anything
+ * else (sort/order/filter) is not forwarded — the backend rejects unknown
+ * parameters instead of silently ignoring them.
  */
-const ASSET_LIST_KEYS = ['page', 'pageSize'] as const;
+const ASSET_LIST_KEYS = ['page', 'pageSize', 'search', 'department', 'status', 'risk'] as const;
 
 export const AssetService = {
   async list(params?: ApiListParams): Promise<PaginatedResponse<Entity>> {

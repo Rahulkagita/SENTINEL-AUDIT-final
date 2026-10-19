@@ -43,7 +43,10 @@ public class VersionResponseDto {
                 .id(version.getId() != null ? version.getId().toString() : "")
                 .entityId(version.getAssetId() != null ? version.getAssetId().toString() : "")
                 .entityName(version.getAssetName() != null ? version.getAssetName() : "")
-                .operation("UPDATE")
+                // A version row stores a snapshot, not the operation that
+                // produced it, so no operation is claimed here (the previous
+                // hardcoded "UPDATE" was fabricated and is not displayed).
+                .operation("")
                 .severity("info")
                 .status("verified")
                 .actor(AuditLogResponseDto.ActorDto.builder()

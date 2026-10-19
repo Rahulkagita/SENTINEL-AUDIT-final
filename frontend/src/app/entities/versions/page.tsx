@@ -20,7 +20,6 @@ import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/app-shell';
 import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -73,7 +72,6 @@ export default function VersionHistoryPage() {
 
   // States
   const [searchQuery, setSearchQuery] = useState('');
-  const [actionFilter, setActionFilter] = useState('all');
   const [cardPage, setCardPage] = useState(1);
   const cardsPerPage = 5;
 
@@ -92,14 +90,13 @@ export default function VersionHistoryPage() {
   // Filtered versions list
   const filteredVersions = useMemo(() => {
     return versions.filter((ver: VersionResponse) => {
-      const matchesSearch =
+      return (
         ver.versionName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         ver.log.actor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (ver.log.reason && ver.log.reason.toLowerCase().includes(searchQuery.toLowerCase()));
-      const matchesAction = actionFilter === 'all' || ver.log.operation === actionFilter;
-      return matchesSearch && matchesAction;
+        (ver.log.reason && ver.log.reason.toLowerCase().includes(searchQuery.toLowerCase()))
+      );
     });
-  }, [versions, searchQuery, actionFilter]);
+  }, [versions, searchQuery]);
 
   // Paginated versions list
   const paginatedVersions = useMemo(() => {
@@ -220,21 +217,6 @@ export default function VersionHistoryPage() {
                   className="pl-8 h-8 text-xs"
                 />
               </div>
-
-              <div className="flex gap-2">
-                <Select value={actionFilter} onValueChange={(v) => { setActionFilter(v); setCardPage(1); }}>
-                  <SelectTrigger className="w-full h-8 text-xs bg-background">
-                    <SelectValue placeholder="Action" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Operations</SelectItem>
-                    <SelectItem value="CREATE">Create</SelectItem>
-                    <SelectItem value="UPDATE">Update</SelectItem>
-                    <SelectItem value="DELETE">Delete</SelectItem>
-                    <SelectItem value="RESTORE">Restore</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
             {/* Version Cards list */}
@@ -262,18 +244,6 @@ export default function VersionHistoryPage() {
                         <span className={`text-xs font-bold ${isActive ? 'text-primary' : 'text-foreground'}`}>
                           {ver.versionName}
                         </span>
-                        <Badge
-                          variant="outline"
-                          className={`text-4xs font-bold py-0 h-4 px-1 ${
-                            ver.log.operation === 'CREATE'
-                              ? 'border-success/30 bg-success/5 text-success'
-                              : ver.log.operation === 'DELETE'
-                              ? 'border-destructive/30 bg-destructive/5 text-destructive'
-                              : 'border-primary/30 bg-primary/5 text-primary'
-                          }`}
-                        >
-                          {ver.log.operation}
-                        </Badge>
                       </div>
                     </div>
 
@@ -342,9 +312,6 @@ export default function VersionHistoryPage() {
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-lg font-bold text-foreground">{activeVersion.versionName}</span>
-                      <Badge variant="outline" className="text-2xs py-0 h-5 px-2 font-semibold">
-                        {activeVersion.log.operation}
-                      </Badge>
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">

@@ -81,6 +81,97 @@ cd backend
 ./gradlew bootRun
 ```
 
+## SentinelAudit Assistant (optional, read-only RAG)
+
+The assistant answers questions from a curated documentation corpus **and**
+live, allowlisted read-only database queries. It is entirely optional: with no
+provider key it stays in a "not configured" state (chat returns `503`) and the
+rest of the app is unaffected. It never writes to the database.
+
+All assistant settings are read from environment variables and are
+**backend-only** — none of them may be exposed via `NEXT_PUBLIC_*`.
+
+### Enabling the assistant
+
+At minimum, set a model key (and, unless you opt into local embeddings, an
+embedding key). The embedding key falls back to the LLM key.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ASSISTANT_LLM_API_KEY` | *(empty)* | **Required to enable answering** |
+| `ASSISTANT_LLM_PROVIDER` | `openai` | OpenAI-compatible HTTP |
+| `ASSISTANT_LLM_BASE_URL` | `https://api.openai.com/v1` | Any compatible endpoint |
+| `ASSISTANT_LLM_MODEL` | `gpt-4o-mini` | |
+| `ASSISTANT_LLM_TIMEOUT_SECONDS` | `30` | |
+| `ASSISTANT_LLM_MAX_OUTPUT_TOKENS` | `900` | |
+| `ASSISTANT_LLM_TEMPERATURE` | `0.2` | |
+| `ASSISTANT_EMBEDDING_PROVIDER` | `openai` | `local` = offline deterministic (lexical, non-semantic; dev/tests only) |
+| `ASSISTANT_EMBEDDING_API_KEY` | *falls back to `ASSISTANT_LLM_API_KEY`* | |
+| `ASSISTANT_EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | |
+| `ASSISTANT_EMBEDDING_MODEL` | `text-embedding-3-small` | Changing this forces a re-embed |
+| `ASSISTANT_EMBEDDING_DIMENSIONS` | `1536` | |
+| `ASSISTANT_EMBEDDING_TIMEOUT_SECONDS` | `30` | |
+
+### Retrieval, limits and indexing
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ASSISTANT_RETRIEVAL_TOP_K` | `6` | Chunks passed to the model |
+| `ASSISTANT_RETRIEVAL_MIN_SCORE` | `0.12` | Minimum cosine similarity |
+| `ASSISTANT_RETRIEVAL_MAX_CHUNKS` | `5000` | Upper bound on chunks scanned |
+| `ASSISTANT_CHAT_MAX_MESSAGE_CHARS` | `4000` | |
+| `ASSISTANT_CHAT_MAX_HISTORY_MESSAGES` | `12` | |
+| `ASSISTANT_CHAT_MAX_HISTORY_CHARS` | `8000` | |
+| `ASSISTANT_CHAT_MAX_TOOL_ITERATIONS` | `3` | Bounds the function-calling loop |
+| `ASSISTANT_CHAT_MAX_TOOL_RESULT_CHARS` | `6000` | |
+| `ASSISTANT_INDEXING_ALLOW_API` | `true` | Allows `POST /api/assistant/reindex` (still JWT-required) |
+| `ASSISTANT_INDEX_ON_STARTUP` | `false` | Best-effort index at boot |
+| `ASSISTANT_KNOWLEDGE_ROOT` | *(empty)* | Optional filesystem corpus root |
+| `ASSISTANT_KNOWLEDGE_DOCS` | `PROTOTYPE_AUDIT.md,README-ENVIRONMENT.md` | Files under the root, applied only when the root is set |
+| `ASSISTANT_INDEX_MAX_CHUNK_CHARS` | `1000` | |
+| `ASSISTANT_INDEX_CHUNK_OVERLAP_CHARS` | `150` | |
+
+### Vector storage
+
+Embeddings are stored as JSON in a plain PostgreSQL table
+`assistant_knowledge_chunks` (created by `ddl-auto=update`) and compared with
+in-process cosine similarity. **No extension is required.** `pgvector` is the
+documented scale-up path for large corpora, but it is not assumed here.
+
+### Indexing
+
+Index the curated docs (idempotent — safe to repeat) after any docs change:
+
+```bash
+# <jwt> = access token from POST /api/auth/login
+curl -X POST http://localhost:8080/api/assistant/reindex -H "Authorization: Bearer <jwt>"
+```
+
+Or set `ASSISTANT_INDEX_ON_STARTUP=true` to build it at boot.
+
+### What gets indexed
+
+Only the curated, non-secret Markdown under
+`backend/src/main/resources/assistant/knowledge/` (plus, if configured, the
+allowlisted files under `ASSISTANT_KNOWLEDGE_ROOT`). Secrets, `.env` files,
+`node_modules`, build outputs, binaries and user uploads are never indexed.
+
+### Data sharing
+
+Prompts — the question, the retrieved documentation excerpts and the live-query
+results — are sent to the configured provider endpoint. Account for that in any
+privacy review before enabling the assistant in production.
+
+### Verify
+
+```bash
+curl http://localhost:8080/api/assistant/status -H "Authorization: Bearer <jwt>"
+```
+
+`configured: true` + a non-zero `indexedChunks` means the assistant is ready.
+With no key configured, `/api/assistant/chat` returns `503` and the UI shows a
+"not configured" banner — it will not fabricate an answer.
+
 ## Schema management
 
 `spring.jpa.hibernate.ddl-auto=update` — Hibernate **only adds** missing

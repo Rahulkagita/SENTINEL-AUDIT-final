@@ -77,18 +77,7 @@ public class AssetVersionService {
         LocalDateTime now = LocalDateTime.now();
 
         // 1. Preserve the CURRENT state in history before overwriting it.
-        AssetVersion snapshot = AssetVersion.builder()
-                .assetId(asset.getId())
-                .version(asset.getVersion())
-                .assetName(asset.getAssetName())
-                .assetType(asset.getAssetType())
-                .description(asset.getDescription())
-                .content(asset.getContent())
-                .status(asset.getStatus())
-                .modifiedBy(actor)
-                .modifiedAt(now)
-                .build();
-        repository.save(snapshot);
+        recordSnapshot(asset, asset.getVersion(), actor, now);
 
         // 2. Apply the restored content to the live asset.
         asset.setAssetName(target.getAssetName());
@@ -102,18 +91,7 @@ public class AssetVersionService {
         protectedAssetRepository.save(asset);
 
         // 3. Record the new restored state as the newest version.
-        AssetVersion restored = AssetVersion.builder()
-                .assetId(asset.getId())
-                .version(asset.getVersion())
-                .assetName(asset.getAssetName())
-                .assetType(asset.getAssetType())
-                .description(asset.getDescription())
-                .content(asset.getContent())
-                .status(asset.getStatus())
-                .modifiedBy(actor)
-                .modifiedAt(now)
-                .build();
-        restored = repository.save(restored);
+        AssetVersion restored = recordSnapshot(asset, asset.getVersion(), actor, now);
 
         // 4. Audit event.
         auditLogRepository.save(AuditLog.builder()
@@ -132,11 +110,44 @@ public class AssetVersionService {
                 .build();
     }
 
+    /**
+     * Writes the snapshot for {@code (assetId, version)}, overwriting any row
+     * that already has that version number. Version numbers are unique per
+     * asset: without this, two consecutive restores could both snapshot the
+     * same number and leave duplicate rows that a version lookup cannot
+     * resolve deterministically.
+     */
+    @Transactional
+    public AssetVersion recordSnapshot(ProtectedAsset asset,
+                                       Integer versionNumber,
+                                       String actor,
+                                       LocalDateTime modifiedAt) {
+
+        AssetVersion version = repository
+                .findByAssetIdAndVersion(asset.getId(), versionNumber)
+                .orElseGet(AssetVersion::new);
+
+        version.setAssetId(asset.getId());
+        version.setVersion(versionNumber);
+        version.setAssetName(asset.getAssetName());
+        version.setAssetType(asset.getAssetType());
+        version.setDescription(asset.getDescription());
+        version.setContent(asset.getContent());
+        version.setStatus(asset.getStatus());
+        version.setModifiedBy(actor);
+        version.setModifiedAt(modifiedAt);
+
+        return repository.save(version);
+    }
+
+    /**
+     * Version history stays readable after a soft delete (the rows are
+     * preserved), so reads only require that the asset row itself exists.
+     * Restoring is separately blocked for deleted assets in
+     * {@link #restoreVersion(Long, Integer)}.
+     */
     private void ensureAssetExists(Long assetId) {
-        boolean exists = protectedAssetRepository.findById(assetId)
-                .filter(a -> !Boolean.TRUE.equals(a.getDeleted()))
-                .isPresent();
-        if (!exists) {
+        if (!protectedAssetRepository.existsById(assetId)) {
             throw new NotFoundException("Asset " + assetId + " does not exist");
         }
     }

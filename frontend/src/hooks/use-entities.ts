@@ -25,8 +25,11 @@ export function useEntity(id: string) {
  * refresh every affected list: the asset lists themselves plus the Audit
  * Timeline and Audit Logs views, which would otherwise keep showing stale
  * (pre-creation) data until their own cache entry expired.
+ *
+ * Exported so the invalidation contract can be unit-tested against a real
+ * QueryClient without rendering React.
  */
-function invalidateAssetSideEffects(queryClient: ReturnType<typeof useQueryClient>) {
+export function invalidateAssetSideEffects(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.entities, exact: false });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.timelines, exact: false });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.auditLogs, exact: false });

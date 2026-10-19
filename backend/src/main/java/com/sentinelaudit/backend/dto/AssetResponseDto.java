@@ -23,6 +23,7 @@ public class AssetResponseDto {
     private String name;           // system key / assetType used as record key
     private String displayName;    // human-readable name
     private String category;       // assetType
+    private String description;    // optional free-text metadata (nullable)
     private String sourceApplication;
     private long recordCount;
     private long changeCount;      // = version - 1 (number of updates)
@@ -76,6 +77,7 @@ public class AssetResponseDto {
                 .name(asset.getAssetType() != null ? asset.getAssetType().toLowerCase().replace(" ", "_") : "")
                 .displayName(asset.getAssetName() != null ? asset.getAssetName() : "")
                 .category(asset.getAssetType() != null ? asset.getAssetType() : "")
+                .description(asset.getDescription())
                 .sourceApplication(asset.getSourceApplication() != null ? asset.getSourceApplication() : "SentinelAudit")
                 .recordCount(0)
                 .changeCount(changes)

@@ -46,7 +46,7 @@ describe('AssetService.list pagination contract', () => {
     expect(url.searchParams.get('pageSize')).toBe('100');
   });
 
-  it('forwards no unsupported parameters to /api/assets', async () => {
+  it('forwards the supported server-side filters and drops unsupported ones', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       data: [], total: 0, page: 0, pageSize: 10, totalPages: 0,
     }));
@@ -56,6 +56,9 @@ describe('AssetService.list pagination contract', () => {
       page: 2,
       pageSize: 10,
       search: 'invoice',
+      department: 'finance',
+      status: 'connected',
+      risk: 'high',
       sort: 'createdAt',
       order: 'desc',
       operation: 'CREATE',
@@ -63,7 +66,11 @@ describe('AssetService.list pagination contract', () => {
 
     const url = lastRequestUrl(fetchMock);
     expect(url.searchParams.get('page')).toBe('1'); // UI page 2 -> API page 1
-    expect(url.searchParams.has('search')).toBe(false); // not supported by /api/assets
+    expect(url.searchParams.get('search')).toBe('invoice');
+    expect(url.searchParams.get('department')).toBe('finance');
+    expect(url.searchParams.get('status')).toBe('connected');
+    expect(url.searchParams.get('risk')).toBe('high');
+    // These are still not understood by GET /api/assets.
     expect(url.searchParams.has('sort')).toBe(false);
     expect(url.searchParams.has('order')).toBe(false);
     expect(url.searchParams.has('operation')).toBe(false);

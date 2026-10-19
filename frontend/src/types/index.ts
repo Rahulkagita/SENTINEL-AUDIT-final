@@ -19,6 +19,8 @@ export interface Entity {
   name: string;
   displayName: string;
   category: string;
+  /** Optional free-text metadata. Null when the asset has no description. */
+  description?: string;
   sourceApplication: string;
   recordCount: number;
   changeCount: number;
@@ -120,4 +122,8 @@ export interface ApiListParams extends PaginationParams {
    * applies it server-side, so only matching rows are returned.
    */
   operation?: string;
+  /** Asset-list filters, all applied server-side by GET /api/assets. */
+  department?: string;
+  status?: string;
+  risk?: string;
 }

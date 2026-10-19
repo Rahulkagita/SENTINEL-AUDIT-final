@@ -2,7 +2,8 @@
 
 import { motion } from 'framer-motion';
 import { ScrollText, Search } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Table,
   TableBody,
@@ -38,10 +39,22 @@ const row = {
 };
 
 export function AuditLogTable() {
+  // The dashboard "view in audit logs" link deep-links here with ?search=<assetId>,
+  // which the backend matches against the asset id/name/actor. Seed the search
+  // box from that param so the link actually filters the table.
+  const searchParams = useSearchParams();
+  const paramSearch = searchParams.get('search') ?? '';
+
   const [page, setPage] = useState(1); // one-based UI page (service -> zero-based on the wire)
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(paramSearch);
   const [operation, setOperation] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Reflect a later deep-link navigation to the same route.
+  useEffect(() => {
+    setSearch(paramSearch);
+    setPage(1);
+  }, [paramSearch]);
 
   // GET /api/audit/logs applies search/operation server-side (real params);
   // sort/order/filter objects are not supported and are never sent.

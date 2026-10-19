@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -12,8 +12,6 @@ import {
   Eye,
   FileText,
   SlidersHorizontal,
-  ChevronDown,
-  ChevronUp,
   GitBranch,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -63,6 +61,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -80,14 +79,19 @@ import type { Entity } from '@/types';
 
 /**
  * Form schema — only fields the Spring Boot backend actually accepts
- * (CreateAssetRequest/UpdateAssetRequest): assetName, assetType, status,
- * department, ownerName, ownerEmail, risk, sourceApplication. The backend
- * derives the system key from assetType and assigns the version number
- * itself, so no `name` or `version` inputs are collected here.
+ * (CreateAssetRequest/UpdateAssetRequest): assetName, assetType, description,
+ * status, department, ownerName, ownerEmail, risk, sourceApplication. The
+ * backend derives the system key from assetType and assigns the version
+ * number itself, so no `name` or `version` inputs are collected here.
+ *
+ * `content` (a raw payload with no viewer in the MVP) is deliberately NOT
+ * collected here — see PROTOTYPE_AUDIT.md for the rationale — but it is
+ * preserved by the backend on edit.
  */
 const assetFormSchema = z.object({
   displayName: z.string().min(2, 'Title must be at least 2 characters'),
   assetType: z.string().min(1, 'Type is required'),
+  description: z.string().max(1000, 'Description must be at most 1000 characters'),
   sourceApplication: z.string().min(1, 'Source application is required'),
   department: z.string().min(1, 'Department is required'),
   ownerName: z.string().min(1, 'Owner name is required'),
@@ -100,16 +104,16 @@ type AssetFormInput = z.infer<typeof assetFormSchema>;
 
 export function ProtectedAssetsTable() {
   const router = useRouter();
+
+  // Server-side filters. `searchInput` is the raw box value; `search` is the
+  // debounced term that actually goes to the backend (no request per keystroke).
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [deptFilter, setDeptFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [riskFilter, setRiskFilter] = useState('all');
 
-  // Sort State
-  const [sortBy, setSortBy] = useState<keyof Entity>('lastChangedAt');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-
-  // Pagination State
+  // Pagination State (one-based UI page)
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -123,62 +127,46 @@ export function ProtectedAssetsTable() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [activeAsset, setActiveAsset] = useState<Entity | null>(null);
 
+  // Debounce the search term so each keystroke does not trigger a request.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
   // TanStack queries/mutations
   //
-  // Pagination contract: the UI counts pages from 1 (this `page: 1` is the
-  // first page a user sees), while GET /api/assets is ZERO-based. The
-  // translation happens once in AssetService.list via toApiPage(), so the
-  // first visible page always requests page=0 from the backend.
-  const { data, isLoading, isError, error, refetch } = useEntities({ page: 1, pageSize: 100 });
+  // Filtering AND pagination happen on the backend, so the response always
+  // covers the complete filtered set (a match beyond the first 100 rows is
+  // still found). The UI counts pages from 1; AssetService.list translates to
+  // the zero-based API contract via toApiPage().
+  const { data, isLoading, isError, error, refetch } = useEntities({
+    page,
+    pageSize,
+    search: search || undefined,
+    department: deptFilter || undefined,
+    status: statusFilter === 'all' ? undefined : statusFilter,
+    risk: riskFilter === 'all' ? undefined : riskFilter,
+  });
   const createMutation = useCreateEntity();
   const updateMutation = useUpdateEntity();
   const deleteMutation = useDeleteEntity();
 
-  const entities: Entity[] = useMemo(() => data?.data ?? [], [data?.data]);
+  // The rows on the current page (server-paged).
+  const entities: Entity[] = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, data?.totalPages ?? 1);
 
-  // Department options are derived from the real loaded rows, so the filter
-  // never offers values that don't exist in the data.
-  const departmentOptions = useMemo(() => {
-    const depts = new Set<string>();
-    entities.forEach((e) => e.department && depts.add(e.department));
-    return Array.from(depts).sort();
-  }, [entities]);
+  const hasActiveFilters =
+    search !== '' || deptFilter !== '' || statusFilter !== 'all' || riskFilter !== 'all';
 
-  // Filter & Search Logic (local computation for fluid user experience)
-  const filteredAssets = useMemo(() => {
-    return entities
-      .filter((asset) => {
-        const ownerName = asset.owner?.name?.toLowerCase() ?? '';
-        const matchesSearch =
-          asset.displayName?.toLowerCase().includes(search.toLowerCase()) ||
-          asset.id?.toLowerCase().includes(search.toLowerCase()) ||
-          ownerName.includes(search.toLowerCase());
-        const matchesDept = deptFilter === 'all' || asset.department === deptFilter;
-        const matchesStatus = statusFilter === 'all' || asset.status === statusFilter;
-        const matchesRisk = riskFilter === 'all' || asset.risk === riskFilter;
-        return matchesSearch && matchesDept && matchesStatus && matchesRisk;
-      })
-      .sort((a, b) => {
-        let valA = a[sortBy];
-        let valB = b[sortBy];
-
-        if (typeof valA === 'string' && typeof valB === 'string') {
-          return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        }
-        if (typeof valA === 'number' && typeof valB === 'number') {
-          return sortOrder === 'asc' ? valA - valB : valB - valA;
-        }
-        return 0;
-      });
-  }, [entities, search, deptFilter, statusFilter, riskFilter, sortBy, sortOrder]);
-
-  // Paginated Slices
-  const paginatedAssets = useMemo(() => {
-    const startIndex = (page - 1) * pageSize;
-    return filteredAssets.slice(startIndex, startIndex + pageSize);
-  }, [filteredAssets, page, pageSize]);
-
-  const totalPages = Math.ceil(filteredAssets.length / pageSize) || 1;
+  // If a mutation shrinks the result set (e.g. deleting the only row on the
+  // last page), clamp the page so the user is never stranded on an empty page.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   // React Hook Form for Create/Edit
   const form = useForm<AssetFormInput>({
@@ -186,6 +174,7 @@ export function ProtectedAssetsTable() {
     defaultValues: {
       displayName: '',
       assetType: '',
+      description: '',
       sourceApplication: '',
       department: '',
       ownerName: '',
@@ -195,21 +184,10 @@ export function ProtectedAssetsTable() {
     },
   });
 
-  // Handle Sort
-  const handleSort = (field: keyof Entity) => {
-    if (sortBy === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(field);
-      setSortOrder('desc');
-    }
-    setPage(1);
-  };
-
   // Handle Selection checkbox click
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(paginatedAssets.map((a) => a.id));
+      setSelectedIds(entities.map((a) => a.id));
     } else {
       setSelectedIds([]);
     }
@@ -231,8 +209,9 @@ export function ProtectedAssetsTable() {
    * previous search term, department, status or risk filter).
    */
   const revealNewAsset = () => {
+    setSearchInput('');
     setSearch('');
-    setDeptFilter('all');
+    setDeptFilter('');
     setStatusFilter('all');
     setRiskFilter('all');
     setPage(1);
@@ -244,7 +223,7 @@ export function ProtectedAssetsTable() {
       await createMutation.mutateAsync({
         assetName: values.displayName,
         assetType: values.assetType,
-        content: '',
+        description: values.description,
         status: values.status,
         department: values.department,
         ownerName: values.ownerName,
@@ -268,6 +247,7 @@ export function ProtectedAssetsTable() {
     setActiveAsset(asset);
     form.setValue('displayName', asset.displayName);
     form.setValue('assetType', asset.category);
+    form.setValue('description', asset.description ?? '');
     form.setValue('sourceApplication', asset.sourceApplication);
     form.setValue('department', asset.department);
     form.setValue('ownerName', asset.owner.name);
@@ -286,6 +266,8 @@ export function ProtectedAssetsTable() {
         data: {
           assetName: values.displayName,
           assetType: values.assetType,
+          // Empty string explicitly clears the description on the backend.
+          description: values.description,
           status: values.status,
           department: values.department,
           ownerName: values.ownerName,
@@ -333,22 +315,25 @@ export function ProtectedAssetsTable() {
     }
   };
 
-  // Export selected / all to CSV (real client-side export of loaded rows)
+  // Export the rows currently loaded (or the selected ones) to CSV. The full
+  // filtered set is paged on the server, so this exports the visible page
+  // rather than pretending to export the entire dataset.
   const handleExportCSV = (exportSelected = false) => {
     const assetsToExport = exportSelected
       ? entities.filter((e) => selectedIds.includes(e.id))
-      : filteredAssets;
+      : entities;
 
     if (assetsToExport.length === 0) {
       toast.error('No assets available for export.');
       return;
     }
 
-    const headers = ['Asset ID', 'Title', 'Type', 'Source Application', 'Department', 'Owner Name', 'Owner Email', 'Status', 'Version', 'Risk', 'Change Count', 'Last Changed'];
+    const headers = ['Asset ID', 'Title', 'Type', 'Description', 'Source Application', 'Department', 'Owner Name', 'Owner Email', 'Status', 'Version', 'Risk', 'Change Count', 'Last Changed'];
     const rows = assetsToExport.map((a) => [
       a.id,
       a.displayName,
       a.category,
+      a.description ?? '',
       a.sourceApplication,
       a.department,
       a.owner.name,
@@ -397,21 +382,18 @@ export function ProtectedAssetsTable() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search assets, owners, department…"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
           />
         </div>
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Export options */}
+          {/* Export the rows currently on screen */}
           <Button variant="outline" size="sm" onClick={() => handleExportCSV(false)}>
             <Download className="mr-2 h-4 w-4" />
-            Export CSV
+            Export Page CSV
           </Button>
 
           {/* Track Asset */}
@@ -429,18 +411,13 @@ export function ProtectedAssetsTable() {
           <span>Filters:</span>
         </div>
 
-        {/* Dept Filter — options derived from real data */}
-        <Select value={deptFilter} onValueChange={(v) => { setDeptFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-[180px] h-8 text-xs bg-background">
-            <SelectValue placeholder="Department" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Departments</SelectItem>
-            {departmentOptions.map((dept) => (
-              <SelectItem key={dept} value={dept}>{dept}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Department filter — case-insensitive substring match, applied server-side */}
+        <Input
+          value={deptFilter}
+          onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }}
+          placeholder="Department"
+          className="w-[180px] h-8 text-xs bg-background"
+        />
 
         {/* Status Filter */}
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
@@ -510,22 +487,22 @@ export function ProtectedAssetsTable() {
       {/* 4. Main Assets Data Table */}
       {isLoading ? (
         <TableSkeleton rows={8} />
-      ) : filteredAssets.length === 0 ? (
+      ) : entities.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title={entities.length === 0 ? 'No assets yet' : 'No assets matching filters'}
+          title={hasActiveFilters ? 'No assets matching filters' : 'No assets yet'}
           description={
-            entities.length === 0
-              ? 'Create your first asset to start recording changes and version history.'
-              : 'Try modifying the search keywords or clearing the filters.'
+            hasActiveFilters
+              ? 'Try modifying the search keywords or clearing the filters.'
+              : 'Create your first asset to start recording changes and version history.'
           }
           action={
-            entities.length === 0 ? (
+            hasActiveFilters ? undefined : (
               <Button size="sm" onClick={() => { form.reset(); setIsCreateOpen(true); }}>
                 <Plus className="mr-2 h-4 w-4" />
                 Create Asset
               </Button>
-            ) : undefined
+            )
           }
         />
       ) : (
@@ -538,34 +515,24 @@ export function ProtectedAssetsTable() {
                     <input
                       type="checkbox"
                       className="rounded border-gray-300 focus:ring-accent"
-                      checked={selectedIds.length === paginatedAssets.length && paginatedAssets.length > 0}
+                      checked={selectedIds.length === entities.length && entities.length > 0}
                       onChange={(e) => handleSelectAll(e.target.checked)}
                     />
                   </TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Asset ID</TableHead>
-                  <TableHead className="text-2xs cursor-pointer select-none" onClick={() => handleSort('displayName')}>
-                    <span className="flex items-center gap-1">
-                      Title
-                      {sortBy === 'displayName' && (sortOrder === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-                    </span>
-                  </TableHead>
+                  <TableHead className="text-2xs uppercase tracking-wider">Title</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Type</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Department</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Owner</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Status</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Version</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider">Risk</TableHead>
-                  <TableHead className="text-2xs cursor-pointer select-none" onClick={() => handleSort('lastChangedAt')}>
-                    <span className="flex items-center gap-1">
-                      Last Modified
-                      {sortBy === 'lastChangedAt' && (sortOrder === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-                    </span>
-                  </TableHead>
+                  <TableHead className="text-2xs uppercase tracking-wider">Last Modified</TableHead>
                   <TableHead className="text-2xs uppercase tracking-wider text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedAssets.map((asset) => {
+                {entities.map((asset) => {
                   const isChecked = selectedIds.includes(asset.id);
                   return (
                     <TableRow
@@ -724,7 +691,7 @@ export function ProtectedAssetsTable() {
                   <SelectItem value="50">50</SelectItem>
                 </SelectContent>
               </Select>
-              <span>per page &bull; Page {page} of {totalPages} &bull; {filteredAssets.length} total assets</span>
+              <span>per page &bull; Page {page} of {totalPages} &bull; {total} total assets</span>
             </div>
             <div className="flex gap-2">
               <Button
@@ -792,6 +759,25 @@ export function ProtectedAssetsTable() {
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Optional description of what this asset contains"
+                        className="resize-none"
+                        rows={2}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <FormField
                 control={form.control}
@@ -955,6 +941,25 @@ export function ProtectedAssetsTable() {
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Optional description of what this asset contains"
+                        className="resize-none"
+                        rows={2}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <FormField
                 control={form.control}
@@ -1169,6 +1174,10 @@ export function ProtectedAssetsTable() {
                   <div className="flex justify-between p-3">
                     <span className="text-muted-foreground">Type</span>
                     <span className="font-medium capitalize">{activeAsset.category}</span>
+                  </div>
+                  <div className="flex justify-between p-3 gap-4">
+                    <span className="text-muted-foreground">Description</span>
+                    <span className="font-medium text-right">{activeAsset.description || '—'}</span>
                   </div>
                   <div className="flex justify-between p-3">
                     <span className="text-muted-foreground">Source System</span>

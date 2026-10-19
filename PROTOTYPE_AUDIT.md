@@ -3,7 +3,7 @@
 **Date:** 2026-10-19
 **Scope:** Full audit and refactor of the SentinelAudit prototype (Next.js 13 frontend + Spring Boot/PostgreSQL backend): removal of all mock/placeholder data, wiring the frontend to the real backend, navigation simplification, honest anomaly-detection decision, security fixes, and tests.
 
-**Outcome in one paragraph:** The frontend no longer contains any mock API routes or fabricated data. Every screen reads from the Spring Boot backend, either through a transparent `/api` proxy (default, zero-config) or via direct calls when `NEXT_PUBLIC_API_BASE_URL` is set. Navigation was reduced to five working sections (Dashboard, Protected Assets, Audit Logs, Audit Timeline, Settings). Anomaly detection was **deferred** (see §4) because no detection engine exists in the backend. One hardcoded credential was removed from the backend configuration. 40 frontend tests and 26 backend tests pass, and an end-to-end smoke test against the running local stack confirmed real backend responses (including 401s) now flow through the frontend.
+**Outcome in one paragraph:** The frontend no longer contains any mock API routes or fabricated data. Every screen reads from the Spring Boot backend, either through a transparent `/api` proxy (default, zero-config) or via direct calls when `NEXT_PUBLIC_API_BASE_URL` is set. Navigation was reduced to five working sections (Dashboard, Protected Assets, Audit Logs, Audit Timeline, Settings). Anomaly detection was **deferred** (see §4) because no detection engine exists in the backend. One hardcoded credential was removed from the backend configuration. A follow-up validation pass (§9) closed the remaining MVP gaps: asset filtering/pagination is now server-side, the `description` field is captured in the UI, a fabricated version "operation" badge was removed, and the dashboard→audit-log deep link was made functional. **46 frontend tests and 34 backend tests pass**, and an end-to-end smoke test against the running local stack confirmed real backend responses (including 401s) now flow through the frontend.
 
 ---
 
@@ -133,27 +133,43 @@ Rationale:
 
 ## 5. Tests & verification (actual results — nothing fabricated)
 
-### 5.1 Frontend — `cd frontend; npm test` → **PASS: 3 files, 40 tests**
+### 5.1 Frontend — `cd frontend; npm test` → **PASS: 8 files, 60 tests**
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `src/lib/pagination.test.ts` | 9 | one-based ⇄ zero-based translation |
-| `src/services/list-contract.test.ts` | 7 | wire contract: `page=0` for first UI page, supported-param whitelists, timeline `assetId`, no invented hashes |
-| `src/mock-free-contract.test.ts` *(new)* | 24 | **guards the refactor itself:** mock route dir & 17 mock files stay deleted, no source imports deleted modules, `next.config.js` proxy present, `/api` default, no `X-Workspace-Id`/supabase, honest naming |
+| `src/services/list-contract.test.ts` | 7 | wire contract: `page=0` for first UI page, supported-param whitelists (`search`/`department`/`status`/`risk` are forwarded, `sort`/`order`/`filter` never), timeline `assetId`, no invented hashes |
+| `src/services/http-client.test.ts` *(new)* | 5 | error handling: JSON error carries status+message, 401 status preserved, non-JSON body still surfaces the status, 204 → `undefined`, Bearer token attached from storage |
+| `src/hooks/use-entities.test.ts` *(new)* | 1 | `invalidateAssetSideEffects` invalidates entity/timeline/audit-log caches via a real `QueryClient`, leaves unrelated (`dashboard`) caches untouched |
+| `src/mock-free-contract.test.ts` | 24 | **guards the refactor itself:** mock route dir & 17 mock files stay deleted, no source imports deleted modules, `next.config.js` proxy present, `/api` default, no `X-Workspace-Id`/supabase, honest naming |
+| `src/services/assistant.test.ts` *(new)* | 5 | assistant wire contract: chat POSTs to `/api/assistant/chat`, **no client-supplied user id** (actor comes from the JWT), 503/400 map to typed `HttpClientError`, status GETs `/api/assistant/status` |
+| `src/features/assistant/lib/citations.test.ts` *(new)* | 6 | citation rendering: validated `[n]` → source, **out-of-range marker stays plain text** (no dead link), empty/plain answers, and `safeHref` rejects `javascript:`/`data:` while allowing relative + http(s) |
+| `src/features/assistant/lib/suggested-questions.test.ts` *(new)* | 3 | suggested prompts span all five categories, contain **no pre-baked answers or citation markers**, and have unique ids |
 
 ### 5.2 Frontend — `npm run typecheck` → **PASS** (`tsc --noEmit`, no output)
 
-### 5.3 Frontend — `npm run build` → **PASS** (Next.js 13 production build; 12/12 pages generated)
+### 5.3 Frontend — `npm run build` → **PASS** (Next.js 13 production build; 13/13 pages generated, including `/assistant`)
 
-### 5.4 Backend — `cd backend; .\gradlew.bat test` → **BUILD SUCCESSFUL** — 26 tests, 0 failures/errors
+### 5.4 Backend — `cd backend; .\gradlew.bat test` → **BUILD SUCCESSFUL** — 73 tests, 0 failures/errors
 
 | Suite | Tests |
 |---|---|
 | `BackendApplicationTests` | 1 |
 | `AssetPaginationRegressionTest` | 4 |
+| `AssetFilteringRegressionTest` *(new)* | **5** — seeds 130 rows via the repository (isolated H2), then proves: a match beyond the first 100 rows is found, department is a case-insensitive substring, status filter matches the UI-mapped value incl. legacy raw `ACTIVE`/`INACTIVE`, `total`/`totalPages` reflect the complete filtered set with **zero-based** page slicing, and unknown/invalid params (`bogus`, `sort`, bad `status`/`risk`) return **400** |
+| `AuthenticatedCoreWorkflowIntegrationTest` *(new)* | **3** — full lifecycle with a **real JWT** (register → token → create → update → version snapshot of pre-update state → restore (content restored, history preserved, `RESTORE` event) → update after restore (no duplicate version names) → delete → 404 on re-read/re-delete → version history still readable); asserts every audit row's actor equals the authenticated email; unauthenticated requests get **401**; a failed `PUT` writes **no** audit event |
 | `AuditTimelineRegressionTest` | 9 |
 | `TimelineResponseDtoTest` | 3 |
-| `UnauthenticatedSecurityRegressionTest` *(new)* | **9** — anonymous requests get JSON **401** on assets (GET+POST), audit logs, timeline, dashboard (summary + recent-activities), versions (list + restore), auth/me; `/api/health` stays public; bad-credential login → 401; malformed login → 4xx |
+| `UnauthenticatedSecurityRegressionTest` | 9 |
+| `assistant.DocumentChunkerTest` *(new)* | 4 — headings + overlap metadata, bounded chunk size, no empty chunks |
+| `assistant.KnowledgeIndexerTest` *(new)* | 3 — idempotent re-index (hash/model skip), stale-chunk removal, embedding failure surfaces |
+| `assistant.CitationFormatterTest` *(new)* | 4 — renumbers valid citations, **drops fabricated/out-of-range ones**, empty when nothing is grounded |
+| `assistant.RetrieverTest` *(new)* | 3 — cosine ranking, `top-k`/min-score, source metadata carried through |
+| `assistant.AssistantToolCatalogTest` *(new)* | 6 — allowlist, **asset-id/date-range validation**, date filtering, unknown tool rejected |
+| `assistant.SystemPromptBuilderTest` *(new)* | 3 — grounding rules, untrusted-content guard, insufficient-evidence sentence |
+| `assistant.AssistantServiceTest` *(new)* | 8 — grounded answer, citation drop, refusal, **provider failure never fabricates**, tool loop, history bound |
+| `assistant.AssistantControllerTest` *(new)* | 4 — DTO validation, actor from principal, error mapping |
+| `assistant.AssistantEndpointSecurityTest` *(new)* | 4 — **401 without JWT**, 503 when unconfigured, 400 on blank message, status endpoint |
 
 ### 5.5 End-to-end smoke test (live local stack)
 
@@ -179,12 +195,16 @@ Postgres (`:5432`), backend (`:8080`), and frontend (`:3000`) were already runni
 
 1. **Anomaly detection is absent by design** (§4) — not hidden behind a disabled toggle; the feature does not exist.
 2. **No hash chain / tamper evidence / IP / user-agent / field-level diffs.** The backend persists operation, actor, asset reference, and full field snapshots for versions — that's it. The UI now says so explicitly instead of implying otherwise. Severity is always `info` and status always `verified` server-side; the UI no longer renders them.
-3. **Assets list filtering is client-side** (first 100 rows): `GET /api/assets` supports only `page`/`pageSize` server-side, so search/department/status/risk filters run over the loaded page. The audit-log and timeline searches *are* server-side.
-4. **Asset form fields:** the create/edit dialog collects only the fields listed above — `description` and `content` are accepted by the DTOs but no UI input collects them yet (create sends `content` empty), so they remain unset unless written via the API directly.
+3. **Asset filtering/pagination is now server-side** (§9.1) — `GET /api/assets` accepts `search`/`department`/`status`/`risk` plus zero-based `page`/`pageSize`; `total` is the complete filtered set, so matches beyond the first 100 rows are found. `department` is a case-insensitive substring (a text box, not a data-derived dropdown) precisely so it works beyond the loaded page. Column sorting was **removed** rather than faked, because the API does not support it — sorting only the current page would misrepresent the order.
+4. **Asset form fields:** the create/edit dialog collects `assetName, assetType, description, status, department, ownerName, ownerEmail, risk, sourceApplication`. `content` (a raw payload with no viewer in the MVP) is deliberately **not** collected — see §9.3 — but it is still accepted via the API and is preserved on edit (a partial body keeps the stored value; an explicit `""` clears it).
 5. **`recordCount` is always 0** from the backend (no row-counting exists), so it is not displayed; `changeCount`/`version` are real (`version - 1` and version counter respectively).
 6. **Runtime verification used the already-running local backend instance** — it predates the `application.properties` password change, so the empty-default behaviour was verified by review + tests (H2 profile) rather than by restarting the production-profile backend.
 7. **README files were not rewritten** — `README-ENVIRONMENT.md` already matched the new (empty) password default; other docs contain no references to removed features (verified by search).
 8. `.env.local` (gitignored) still sets `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api`, i.e., this developer machine bypasses the proxy via CORS. Both paths work; fresh clones default to the proxy.
+9. **No DB migration for `(assetId, version)` uniqueness** (§9.2). `AssetVersion` has no unique constraint on `(assetId, version)`; the service now upserts on that pair so new duplicates cannot be created, but **pre-existing duplicate rows already in the development PostgreSQL database are not cleaned up or constrained by this pass**.
+10. **JWT logout is client-side only.** `POST /api/auth/logout` is a stateless no-op; the token remains valid until it expires (there is no revocation list). Removing it from the client is the full extent of "sign out". The UI does not claim otherwise.
+11. **Audit data is single-tenant.** Every authenticated user can read every audit log, timeline and version row; there is no per-user or per-tenant scoping. `RegistrationRequest` self-signup always assigns `ROLE_USER` (no privilege escalation), but that role is not used to isolate data.
+12. **This pass validated the workflows with automated tests (real JWT through the security filter chain) and not by click-through in a browser.** Browser-level checks (visual states, keyboard/focus, actual network tab) were **not** performed; the automated results above are the evidence.
 
 ## 7. Migrations & environment notes
 
@@ -198,3 +218,232 @@ Postgres (`:5432`), backend (`:8080`), and frontend (`:3000`) were already runni
 - **Modified:** 28 files (wiring, honesty fixes, config)
 - **Added:** 4 files — `PROTOTYPE_AUDIT.md`, `backend/.../UnauthenticatedSecurityRegressionTest.java`, `frontend/src/mock-free-contract.test.ts`, `frontend/src/features/dashboard/components/dashboard-refresh-button.tsx`
 - **Navigation now:** Dashboard · Protected Assets · Audit Logs · Audit Timeline · Settings
+
+---
+
+## 9. Post-refactor validation pass (2026-10-19)
+
+A second pass validated the refactored app end-to-end (via automated tests, see §5) and closed the remaining MVP gaps. No mock data was reintroduced; no destructive operations were run against the development PostgreSQL database (all database-touching tests use an isolated in-memory H2 database).
+
+### 9.1 Asset filtering & pagination moved to the server (Priority 2)
+
+Defect: the assets table fetched a single 100-row page and then filtered/paginated/sorted **in the browser**, so `total` was not the real total, matches past row 100 were invisible, and the department dropdown only offered values that happened to be on the loaded page.
+
+Fix:
+- `GET /api/assets` now accepts `search`, `department`, `status`, `risk` (in addition to zero-based `page`/`pageSize`) and returns a JPA `Page`, so `total`/`totalPages` describe the **complete filtered set**. Implemented with Spring Data's built-in `JpaSpecificationExecutor` (no third-party filtering framework, no repository rewrite).
+- `search` matches name/type/department/owner-name/owner-email (case-insensitive substring) and an exact numeric id. `department` is a case-insensitive substring. `status` maps the UI value back to its raw stored synonyms (`connected`→`connected|active`, `disconnected`→`disconnected|inactive`, plus `error`/`syncing`) so legacy rows still filter correctly. `risk` is an exact match.
+- Unknown query parameters and invalid `status`/`risk` values are rejected with **400** instead of being silently ignored; filter lengths are capped at 200 chars.
+- Frontend: the search box is debounced (300 ms), filter changes reset to page 1, the department filter became a server-side text input (works beyond the loaded page), and the page is clamped if a mutation empties the last page. **Column sorting was removed** — the API does not support server-side sorting, and sorting only the visible page would be misleading.
+- The CSV export now says what it does: it exports the **rows currently loaded** ("Export Page CSV"), not a full-dataset export.
+
+### 9.2 Restore / version-history defects (priority 1)
+
+- Version snapshots are written through a single `recordSnapshot(assetId, version, …)` that **upserts** on `(assetId, version)`. Previously two consecutive restores could both snapshot the same version number and create duplicate rows that a lookup could not resolve deterministically. (No unique constraint was added — see limitation #9.)
+- Version history (`GET /api/versions/asset/{id}`) stays **readable for a soft-deleted asset** (rows are preserved); restore remains blocked for deleted assets. Reads only require the asset row to exist.
+- The `VersionResponseDto` no longer reports a hardcoded operation: a version row stores a snapshot, not the operation that produced it, so the fabricated badge/filter was removed from the UI rather than shown as `UPDATE`.
+
+### 9.3 `description` in the MVP; `content` excluded (Priority 3)
+
+**Decision (unchanged, now documented):** `description` **is** in the MVP; `content` is **excluded from the UI**.
+
+- `description` is exposed on `AssetResponseDto`, collected by validated create/edit form inputs (≤ 1000 chars), loaded on edit, persisted through the API, and included in version snapshots so it survives a restore (covered by the new workflow test).
+- `content` (a raw payload with **no viewer/editor** in the MVP) is deliberately not collected: offering an input for a blob the user can never inspect would be a dead control. The API still accepts it and `updateCurrentAsset` preserves it on ordinary edits (a `null`/absent field keeps the stored value; an explicit `""` clears it), so the field is not silently destroyed.
+- Backend null-guard added for `assetName`, `assetType`, `description` and `content`: a partial `PUT` body keeps stored values instead of blanking them.
+
+### 9.4 Audit-trail correctness & honesty (Priority 4)
+
+- Every audit row's actor is the **authenticated server principal's email** (`UserService.getAuthenticatedUser()`), identical across `CREATE`/`UPDATE`/`DELETE`/`RESTORE`; there is no client-supplied actor. Audit writes happen inside the mutation transaction, so a failed mutation rolls back and writes **no** success event (asserted by test).
+- Removed the last fabricated bit of provenance: the version card/header "operation" badge that always read `UPDATE`.
+- Fixed a dead link: the dashboard activity **"View in audit logs"** action built `?search=<audit-row-id>`, but audit search matches name/actor/action/remarks/asset-id — not the log id — and the audit table ignored the URL param entirely. It now passes `event.assetId` and `AuditLogTable` seeds its search box from `?search=`, so the link actually filters.
+
+### 9.5 Final UX / security pass (Priority 5)
+
+- Registration validation on the backend now mirrors the frontend (`@NotBlank`, `@Email`, password `@Size(min = 6, max = 100)` with `@Valid` on the controller), so the API cannot create accounts the UI would reject.
+- Removed dead auth schemas (`phone`/forgot-password/reset-password/otp) that were exported but unused.
+- Re-confirmed the security posture (stateless JWT, BCrypt, public surface limited to `login`/`register`/`health`, JSON 401/403, CORS allow-list) — no secrets were printed anywhere in this report or the logs.
+- All new work remains **uncommitted**; nothing was committed or pushed.
+
+### 9.6 Files added/changed in this pass
+
+- **Added:** `backend/.../AuthenticatedCoreWorkflowIntegrationTest.java`, `backend/.../AssetFilteringRegressionTest.java`, `frontend/src/services/http-client.test.ts`, `frontend/src/hooks/use-entities.test.ts`.
+- **Changed (backend):** `ProtectedAssetController` (filters + 400s), `ProtectedAssetService` (filtered listing, null-guard, snapshot delegation), `AssetVersionService` (upsert snapshots, deleted-asset reads), `ProtectedAssetRepository` (`JpaSpecificationExecutor`), `AssetResponseDto` (`description`), `VersionResponseDto` (no fabricated operation), `RegisterRequest`/`AuthController` (validation).
+- **Changed (frontend):** `features/entities/components/entity-table.tsx` (server-side filters/pagination, description input, page/CSV labels), `app/entities/versions/page.tsx` (removed fabricated operation UI), `features/dashboard/components/dashboard-activity-feed.tsx` + `features/audit-logs/components/audit-log-table.tsx` (working deep link), `services/assets.ts` + `types/index.ts` + `hooks/use-entities.ts` + `services/list-contract.test.ts` (contract), `features/auth/lib/validation.ts` (dead-schema prune).
+
+---
+
+## 10. SentinelAudit Assistant — read-only RAG (2026-10-19)
+
+A genuine, provider-backed retrieval-augmented assistant was added to the **existing** app (§1–§9 unchanged). It answers from a small curated documentation corpus **and** live, allowlisted read-only queries over the real database, grounds every claim in a validated citation, and refuses when it has no verified evidence. It is **read-only**: it cannot create, update, delete or restore anything. Nothing here is mock data, and no answer is hardcoded.
+
+### 10.1 Architecture (real pipeline, no shortcuts)
+
+```
+POST /api/assistant/chat  (JWT required; actor = authenticated principal)
+        │
+        ▼
+AssistantService ──► Retriever ──► VectorStore (assistant_knowledge_chunks)
+        │                 │  query embedding via EmbeddingProvider
+        │                 ▼
+        │            top-k chunks (score ≥ min-score) + source metadata
+        │
+        ├─► SystemPromptBuilder  (grounding rules + prompt-injection guard)
+        │
+        ├─► LlmClient (OpenAI-compatible function-calling loop, bounded iterations)
+        │        └─► AssistantToolCatalog  (fixed 6-tool allowlist → live DB reads)
+        │
+        └─► CitationFormatter  (validate markers → renumber to [n] → drop fabrications)
+        │
+        ▼
+AssistantChatResponse { answer, sources[], toolsUsed[], provider, model, insufficientEvidence }
+```
+
+- **RAG is real:** documents are loaded, normalised, chunked (**section-aware, with overlap**), embedded, and stored with file + section + content hash. Retrieval is **semantic** (cosine similarity over stored vectors), not keyword `grep`.
+- **Grounded generation:** the model receives only the retrieved excerpts and tool outputs, plus instructions to refuse rather than guess.
+- **Citation validation:** the model emits `[doc:<sourceId>#<chunkIndex>]`, `[asset:<id>]`, `[event:<id>]` markers; `CitationFormatter` keeps only markers that match something actually retrieved and rewrites them to compact `[n]` indices into the returned `sources` array. Invented references are silently dropped, never rendered.
+- **Honest refusal:** when evidence is thin the answer carries the exact refusal sentence and `insufficientEvidence: true`; the UI labels it "could not find enough verified information".
+
+### 10.2 RAG sources and indexing process
+
+Indexed corpus (versioned in the repo, non-secret):
+
+- `backend/src/main/resources/assistant/knowledge/*.md` (8 curated docs): `product-overview.md`, `assets.md`, `audit-and-timeline.md`, `versions-and-restore.md`, `authentication-and-security.md`, `dashboard.md`, `api-reference.md`, `limitations.md`.
+- Optionally, files listed in `ASSISTANT_KNOWLEDGE_DOCS` under the directory given by `ASSISTANT_KNOWLEDGE_ROOT` (both empty by default).
+
+**What is deliberately *not* indexed:** `.env`/`.env.local`, secrets/keys/tokens/credentials, `node_modules`, build outputs (`build/`, `.next/`), binaries, and user uploads. The loader only reads allowlisted text/markdown paths — it does not walk the whole source tree.
+
+Process:
+
+1. `DocumentLoader` reads each configured path (classpath + optional filesystem), rejecting anything outside the allowlist.
+2. `DocumentChunker` splits on headings and packs to `max-chunk-chars` (default 1000) with `chunk-overlap-chars` (default 150); each chunk keeps its section title and a content hash.
+3. `KnowledgeIndexer` is **idempotent**: it skips chunks whose content hash + embedding model already match, embeds only changed text, and removes chunks that no longer exist in the source. Re-indexing is safe to run repeatedly.
+4. Indexing runs on demand via `POST /api/assistant/reindex` (JWT + `assistant.indexing.allow-api`) and, optionally, at startup (`ASSISTANT_INDEX_ON_STARTUP`, default off, best-effort).
+
+### 10.3 Vector storage and provider
+
+- **Storage:** a plain PostgreSQL table `assistant_knowledge_chunks` (created automatically by `ddl-auto=update`), storing the chunk text, source file, section, content hash and the **JSON-encoded embedding**, with in-process cosine similarity at query time. No extension is required. **pgvector is the documented scale-up path**; it is *not* used here because it cannot be assumed installed, and this is stated rather than faked.
+- **Provider:** exactly **one** provider family — OpenAI-compatible HTTP (`openai`). The LLM (`assistant.llm.*`) and embeddings (`assistant.embedding.*`) are independently configurable (base URL, model, key, timeout, dimensions).
+- **Keys:** read only from environment variables; never in `NEXT_PUBLIC_*`; all provider calls happen **backend-only**. Requests have connect/read **timeouts**, an output-token cap, and a per-message/history/tool-result character budget.
+- **Unconfigured = honest failure:** with no key the provider reports `isConfigured() == false`; chat returns **503** and the UI shows a "not configured" banner. The assistant **never fabricates an answer** on provider error, timeout, or embedding failure.
+- **Tests/dev:** a deterministic `LocalHashEmbeddingProvider` (`ASSISTANT_EMBEDDING_PROVIDER=local`) exercises the full pipeline without a network call. It is lexical (bag-of-words), **non-semantic**, and intended for tests only — not a production embedding model.
+
+### 10.4 Live-data tools (read-only allowlist)
+
+Counts and current-state questions are answered from **live database reads**, never from stale semantic retrieval. The fixed allowlist (no generic query tool, no model-generated or arbitrary SQL):
+
+| Tool | Reads | Validation |
+|---|---|---|
+| `list_assets` | paged assets via `ProtectedAssetService` | status/risk enum-checked, `pageSize` 1–50 |
+| `get_asset` | one asset by id | positive integer id |
+| `list_audit_events` | `AuditLogService.getTimeline` + in-tool date filter | operation enum, ISO `from`/`to`, `limit` 1–100 |
+| `asset_versions` | version history for an asset | positive id, `limit` 1–100 |
+| `dashboard_summary` | `DashboardService` totals | none (no args) — flagged "raw totals, no anomaly scoring" |
+| `audit_action_breakdown` | audit action counts | none (no args) |
+
+Every tool call is re-authorized against the server principal; there is no body-supplied user id anywhere in the flow.
+
+### 10.5 Security boundaries
+
+- **Auth required** for `/api/assistant/chat`, `/reindex`; the actor is taken from the JWT principal, never the request body.
+- **Input limits:** message chars, history messages/chars, retrieved chunks, tool-result chars and output tokens are all bounded.
+- **Untrusted content:** retrieved docs and audit text are wrapped and labelled as untrusted data in the prompt (prompt-injection guard); the model is told to ignore instructions found inside them.
+- **Errors:** provider/service failures surface as generic messages (503/400) with **no stack traces or secrets**.
+- **Citations:** distinguished by type (document vs live asset vs audit event); `href`s are validated to relative paths / http(s) so the renderer cannot emit `javascript:` links. The UI never claims anomaly detection, hash-chain/tamper-proofing, field diffs, IP capture or AI risk scores — because none exist.
+- **Scope honesty:** audit data is single-tenant (§6 #11). No tenant isolation is claimed.
+
+### 10.6 Frontend
+
+- New **`/assistant`** page linked from the sidebar (Dashboard · Protected Assets · Audit Logs · Audit Timeline · **Assistant** · Settings).
+- Chat UI consistent with the existing design system: welcome panel with **clickable suggested questions grouped by category** (Product · Live data · Investigating changes · Versions & dashboard · Limitations), message bubbles with timestamps, a loading indicator, error states with **Retry**, per-answer **Copy**, **New conversation** reset, and a source list linking to docs/pages and known assets/audit logs.
+- A **safe, dependency-free Markdown renderer** (`AssistantMarkdown`) — no `dangerouslySetInnerHTML`, so HTML in a model answer renders as text; only relative/http(s) links are allowed.
+- Suggested questions call the **real** `/api/assistant/chat` endpoint — they carry no pre-baked answers or citations.
+- Reuses the existing HTTP client (JWT), React Query setup, and UI primitives. **No mock replies** and no fake typing animation.
+- Multi-turn context is bounded (last 8 turns) and is **not** an auth mechanism — every request re-authenticates and re-checks tool permissions. No tokens or private data are stored in `localStorage`; the conversation lives only in component state and is cleared by "New conversation".
+
+### 10.7 Example questions exercised by the pipeline
+
+- Product knowledge: "What is SentinelAudit and what does it record?", "What information does an audit event contain?" → documentation citations.
+- Live data: "How many protected assets are there right now?", "List the protected assets currently tracked." → `list_assets` / `dashboard_summary`, live counts.
+- Investigation: "What were the most recent changes to assets?", "Who made the latest change and what did they change?", "Show me the change history for the most recently updated asset." → `list_audit_events` / `asset_versions` with asset/event citations.
+- Versions/dashboard: "How does version history and restore work?", "Summarize the current dashboard metrics."
+- Limitations: "Does it track IP addresses or detect anomalies?", "Can SentinelAudit tell me if a change was suspicious or tampered with?" → honest "not implemented" answers.
+
+> These are the flows covered by automated tests (§5). **No live model provider was configured or billed during this pass** — the pipeline was verified with mocked providers in unit tests plus the deterministic local embedding provider. A real-provider answer has **not** been observed end-to-end.
+
+### 10.8 Files added/changed
+
+- **Added (backend):** `assistant/` package — `AssistantProperties`, `AssistantConfig`, `AssistantController`, `AssistantService`, `AssistantStartup`, `AssistantExceptionHandler`, DTOs, `provider/` (`EmbeddingProvider`, `LlmClient`, `OpenAiEmbeddingProvider`, `OpenAiLlmClient`, `LocalHashEmbeddingProvider`, exceptions), `knowledge/` (`DocumentLoader`, `DocumentChunker`, `KnowledgeIndexer`, `KnowledgeChunk`, repository, `EmbeddingCodec`), `vector/VectorStore`, `retrieval/Retriever`, `citation/` (`AnswerSource`, `CitationFormatter`), `tools/` (`ToolDefinition`, `ToolOutcome`, `AssistantToolCatalog`), `prompt/SystemPromptBuilder`; 8 curated docs under `resources/assistant/knowledge/`.
+- **Added (backend tests):** `assistant/**` (9 suites, 39 tests) + `support/InMemoryVectorStore`.
+- **Changed (backend):** `application.properties` (`assistant.*`, env-overridable).
+- **Added (frontend):** `services/assistant.ts`, `hooks/use-assistant.ts`, `features/assistant/lib/{citations,suggested-questions}.ts`, `features/assistant/components/{assistant-chat,assistant-markdown}.tsx`, `app/assistant/page.tsx`, and three test files.
+- **Changed (frontend):** `components/layout/sidebar.tsx` (Assistant link), `lib/constants.ts` (`assistantStatus` query key).
+
+### 10.9 Exact env vars and setup
+
+Enable a live assistant (all optional; absent keys ⇒ assistant reports "not configured"):
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ASSISTANT_LLM_API_KEY` | *(empty)* | **Required to enable answering**; backend-only |
+| `ASSISTANT_LLM_PROVIDER` | `openai` | OpenAI-compatible HTTP |
+| `ASSISTANT_LLM_BASE_URL` | `https://api.openai.com/v1` | Point at any compatible endpoint |
+| `ASSISTANT_LLM_MODEL` | `gpt-4o-mini` | |
+| `ASSISTANT_LLM_TIMEOUT_SECONDS` | `30` | |
+| `ASSISTANT_LLM_MAX_OUTPUT_TOKENS` | `900` | |
+| `ASSISTANT_LLM_TEMPERATURE` | `0.2` | |
+| `ASSISTANT_EMBEDDING_PROVIDER` | `openai` | `local` for offline dev/tests (lexical, non-semantic) |
+| `ASSISTANT_EMBEDDING_API_KEY` | falls back to `ASSISTANT_LLM_API_KEY` | |
+| `ASSISTANT_EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | |
+| `ASSISTANT_EMBEDDING_MODEL` | `text-embedding-3-small` | changing it triggers a re-embed |
+| `ASSISTANT_EMBEDDING_DIMENSIONS` | `1536` | |
+| `ASSISTANT_EMBEDDING_TIMEOUT_SECONDS` | `30` | |
+| `ASSISTANT_RETRIEVAL_TOP_K` | `6` | |
+| `ASSISTANT_RETRIEVAL_MIN_SCORE` | `0.12` | |
+| `ASSISTANT_RETRIEVAL_MAX_CHUNKS` | `5000` | |
+| `ASSISTANT_CHAT_MAX_MESSAGE_CHARS` | `4000` | |
+| `ASSISTANT_CHAT_MAX_HISTORY_MESSAGES` | `12` | |
+| `ASSISTANT_CHAT_MAX_HISTORY_CHARS` | `8000` | |
+| `ASSISTANT_CHAT_MAX_TOOL_ITERATIONS` | `3` | bounds the function-calling loop |
+| `ASSISTANT_CHAT_MAX_TOOL_RESULT_CHARS` | `6000` | |
+| `ASSISTANT_INDEXING_ALLOW_API` | `true` | gate for `POST /api/assistant/reindex` (still JWT-required) |
+| `ASSISTANT_INDEX_ON_STARTUP` | `false` | best-effort startup index |
+| `ASSISTANT_KNOWLEDGE_ROOT` | *(empty)* | optional filesystem corpus root |
+| `ASSISTANT_KNOWLEDGE_DOCS` | `PROTOTYPE_AUDIT.md,README-ENVIRONMENT.md` | files under the root, **only when the root is set** |
+| `ASSISTANT_INDEX_MAX_CHUNK_CHARS` | `1000` | |
+| `ASSISTANT_INDEX_CHUNK_OVERLAP_CHARS` | `150` | |
+
+Setup / verification:
+
+```bash
+# 1. Configure a provider (backend process environment; never NEXT_PUBLIC_*)
+$env:ASSISTANT_LLM_API_KEY   = "<your-key>"
+$env:ASSISTANT_LLM_MODEL     = "gpt-4o-mini"
+$env:ASSISTANT_EMBEDDING_MODEL = "text-embedding-3-small"
+
+cd backend; .\gradlew.bat bootRun     # creates assistant_knowledge_chunks via ddl-auto=update
+
+# 2. Build the index (authenticated; idempotent) — use a real JWT from /api/auth/login
+curl -X POST http://localhost:8080/api/assistant/chat  -H "Authorization: Bearer <jwt>" -H "Content-Type: application/json" -d "{\"message\":\"How many protected assets are there right now?\",\"history\":[]}"
+curl -X POST http://localhost:8080/api/assistant/reindex -H "Authorization: Bearer <jwt>"
+curl        http://localhost:8080/api/assistant/status   -H "Authorization: Bearer <jwt>"
+
+cd ../frontend; npm run dev           # open http://localhost:3000/assistant
+```
+
+**Deployment readiness**
+
+- **Required for the assistant:** a model key + an embedding key (or `local` embeddings), and network egress to the provider base URL. The rest of the app runs without any of it.
+- **Vector storage:** the `assistant_knowledge_chunks` table (Hibernate `update`) — persists in the same PostgreSQL volume; if the DB volume is ephemeral, the index must be rebuilt (call `reindex` or set `ASSISTANT_INDEX_ON_STARTUP=true`).
+- **Indexing:** run `POST /api/assistant/reindex` after a docs change, or enable startup indexing. Re-indexing is idempotent.
+- **Proxy/CORS/health:** the frontend reaches the backend through the existing Next proxy (or direct CORS); `/api/health` is unchanged; an unconfigured assistant degrades to a 503 + UI banner rather than breaking the app.
+- **Data sharing:** prompts (the question, retrieved doc excerpts and tool results) are sent to the configured provider endpoint — document this in any privacy review.
+
+### 10.10 Remaining gaps / not implemented
+
+1. **No live provider was exercised in this pass** (§10.7) — unit tests use mocks; the deterministic local embedding provider is lexical, so retrieval quality with a real embedding model is unverified here.
+2. **`pgvector` / external vector DB not used** — in-process cosine over JSON embeddings; this scans up to `assistant.retrieval.max-chunks` rows and is not built for large corpora.
+3. **No streaming responses** — answers arrive complete.
+4. **Single provider family only** (OpenAI-compatible) — no multi-provider routing or local model support is claimed.
+5. **Conversations are in-memory only** — no transcript persistence, retention policy, or cross-device history (deliberate; avoids storing sensitive content).
+6. **No admin/RBAC gating on `reindex`** — guarded by authentication + `ASSISTANT_INDEXING_ALLOW_API` because the app has no admin role; review before exposing publicly.
+7. **Browser-level checks not performed** — assistant UI states are covered by unit tests and a production build, not by manual click-through (§6 #12).
+8. All work remains **uncommitted**; nothing was committed or pushed.
