@@ -4,9 +4,11 @@ import com.sentinelaudit.backend.dto.AuthResponse;
 import com.sentinelaudit.backend.dto.LoginRequest;
 import com.sentinelaudit.backend.dto.RegisterRequest;
 import com.sentinelaudit.backend.dto.UserResponse;
+import com.sentinelaudit.backend.config.FeatureFlags;
 import com.sentinelaudit.backend.entity.User;
 import com.sentinelaudit.backend.exception.BadRequestException;
 import com.sentinelaudit.backend.exception.ConflictException;
+import com.sentinelaudit.backend.exception.RegistrationDisabledException;
 import com.sentinelaudit.backend.exception.UnauthorizedException;
 import com.sentinelaudit.backend.repository.UserRepository;
 import com.sentinelaudit.backend.security.JwtService;
@@ -28,7 +30,17 @@ public class UserService {
     @Autowired
     private JwtService jwtService;
 
+    @Autowired
+    private FeatureFlags featureFlags;
+
     public AuthResponse register(RegisterRequest request) {
+
+        // Backend-enforced gate: a restricted deployment disables public
+        // signup here, so the setting cannot be bypassed by calling the API
+        // directly. Existing-user login is unaffected.
+        if (!featureFlags.isRegistrationEnabled()) {
+            throw new RegistrationDisabledException("Registration is disabled by configuration");
+        }
 
         if (request.getEmail() == null || request.getEmail().isBlank()) {
             throw new BadRequestException("Email is required");

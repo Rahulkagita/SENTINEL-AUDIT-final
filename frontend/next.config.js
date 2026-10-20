@@ -6,8 +6,10 @@
 const API_PROXY_TARGET = process.env.API_PROXY_TARGET || 'http://localhost:8080';
 
 const nextConfig = {
+  // Lint failures must fail the deployment build: a clean `npm run lint`
+  // is enforced in CI/local before build, so this is not disabled.
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: false,
   },
   images: { unoptimized: true },
   async rewrites() {

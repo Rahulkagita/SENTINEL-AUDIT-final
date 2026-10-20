@@ -3,6 +3,7 @@ package com.sentinelaudit.backend.assistant.provider;
 import tools.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
@@ -98,6 +99,11 @@ public class OpenAiLlmClient implements LlmClient {
 
         } catch (AssistantProviderException | AssistantNotConfiguredException e) {
             throw e;
+        } catch (ResourceAccessException e) {
+            // Read/connect timeout or transport error - kept distinct so a slow
+            // provider is diagnosable in the logs. Never logs the prompt or key.
+            log.warn("LLM provider call timed out or was unreachable: {}", e.getClass().getSimpleName());
+            throw new AssistantProviderException("Chat completion request timed out or was unreachable", e);
         } catch (Exception e) {
             log.warn("LLM provider call failed: {}", e.getClass().getSimpleName());
             throw new AssistantProviderException("Chat completion request failed", e);

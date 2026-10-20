@@ -3,12 +3,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { Eye, EyeOff, User, Mail, Lock, ArrowRight } from 'lucide-react';
 
 import { useAuth } from '@/hooks/use-auth';
+import { AuthenticationService } from '@/services/auth';
 import { AuthLayout } from '@/features/auth/components/auth-layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +30,16 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // The backend enforces this; the query only lets the UI avoid showing a
+  // form the server would reject. undefined while loading -> render the form
+  // (fails open, and the server remains the source of truth).
+  const { data: authConfig } = useQuery({
+    queryKey: ['auth-config'],
+    queryFn: () => AuthenticationService.getConfig(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const registrationDisabled = authConfig?.registrationEnabled === false;
 
   const form = useForm<RegisterInput>({
     resolver: zodResolver(registerSchema),
@@ -62,6 +74,23 @@ export default function RegisterPage() {
       title="Create account"
       subtitle="Register a new enterprise tenant role for compliance tracking"
     >
+      {registrationDisabled ? (
+        <div className="space-y-4 text-sm text-muted-foreground">
+          <p>
+            Self-service registration is disabled on this deployment. Ask an
+            administrator to create your account, or sign in if you already
+            have one.
+          </p>
+          <Link
+            href="/auth/login"
+            className="inline-flex items-center font-semibold text-primary hover:text-accent transition-colors"
+          >
+            Go to sign in
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Link>
+        </div>
+      ) : (
+      <>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
           <FormField
@@ -183,6 +212,8 @@ export default function RegisterPage() {
           Sign in here
         </Link>
       </div>
+      </>
+      )}
     </AuthLayout>
   );
 }

@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,5 +72,43 @@ class AssistantControllerTest {
                 .thenReturn(User.builder().id(1L).email("a@example.com").build());
 
         assertThatThrownBy(() -> controller.reindex()).isInstanceOf(ForbiddenException.class);
+    }
+
+    /**
+     * Reindexing must stay off by default: an ordinary authenticated
+     * ROLE_USER cannot trigger it unless an operator deliberately sets
+     * ASSISTANT_INDEXING_ALLOW_API=true. This pins the default so a future
+     * change cannot silently open the write path to every registered user.
+     */
+    @Test
+    void reindexIsDisabledByDefaultForAnOrdinaryUser() {
+        boolean allowApiByDefault = properties.getIndexing().isAllowApi();
+        assertThat(allowApiByDefault)
+                .as("allow-api must default to false")
+                .isFalse();
+
+        User ordinaryUser = User.builder().id(2L).email("user@example.com").role("USER").build();
+        when(userService.getAuthenticatedUserOrThrow()).thenReturn(ordinaryUser);
+
+        assertThatThrownBy(() -> controller.reindex())
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessageContaining("disabled");
+    }
+
+    @Test
+    void reindexIsOnlyReachableWhenExplicitlyEnabled() {
+        properties.getIndexing().setAllowApi(true);
+        when(userService.getAuthenticatedUserOrThrow())
+                .thenReturn(User.builder().id(3L).email("user@example.com").role("USER").build());
+        when(assistantService.reindex())
+                .thenReturn(new com.sentinelaudit.backend.assistant.dto.ReindexResponse(
+                        List.<String>of(), 0, 0, 0, "model"));
+
+        boolean allowApiWhenEnabled = properties.getIndexing().isAllowApi();
+        assertThat(allowApiWhenEnabled).isTrue();
+
+        controller.reindex();
+
+        verify(assistantService).reindex();
     }
 }

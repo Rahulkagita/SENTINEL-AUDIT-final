@@ -29,6 +29,7 @@ import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import { AssistantMarkdown } from './assistant-markdown';
+import { errorMessage } from '../lib/chat-errors';
 import { safeHref } from '../lib/citations';
 import { groupSuggestions, SUGGESTED_QUESTIONS } from '../lib/suggested-questions';
 
@@ -54,24 +55,6 @@ function buildHistory(messages: ChatMessage[]): { role: 'user' | 'assistant'; co
     .filter((message) => !message.error)
     .map((message) => ({ role: message.role, content: message.content }))
     .slice(-8);
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof HttpClientError) {
-    if (error.statusCode === 401) return 'Your session has expired. Please sign in again.';
-    if (error.statusCode === 503) {
-      return 'The assistant is unavailable right now — it may not be configured on this server. Please try again later.';
-    }
-    if (error.statusCode >= 500) {
-      return 'The backend is unavailable right now. Please try again shortly.';
-    }
-    return error.message || 'Something went wrong. Please try again.';
-  }
-  // fetch() rejects with a TypeError when the backend cannot be reached at all.
-  if (error instanceof TypeError) {
-    return 'Could not reach the SentinelAudit backend. Please check that the server is running and try again.';
-  }
-  return 'Something went wrong. Please try again.';
 }
 
 type AssistantChatVariant = 'page' | 'floating';

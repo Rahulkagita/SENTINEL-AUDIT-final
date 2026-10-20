@@ -22,7 +22,7 @@ import java.util.List;
 /**
  * Stateless JWT security.
  *
- * - /api/auth/login and /api/auth/register are public.
+ * - /api/auth/login, /api/auth/register and /api/auth/config are public.
  * - /api/health is public.
  * - Everything else requires a valid JWT.
  *
@@ -59,7 +59,7 @@ public class SecurityConfig {
                         // CORS preflight
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Public auth endpoints
-                        .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/config").permitAll()
                         // Health check
                         .requestMatchers("/api/health").permitAll()
                         // Everything else requires authentication

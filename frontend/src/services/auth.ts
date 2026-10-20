@@ -34,6 +34,17 @@ export interface RegisterRequest {
 }
 
 /**
+ * Matches com.sentinelaudit.backend.dto.AuthConfigResponse.
+ *
+ * A public, non-secret capability snapshot. The backend still enforces the
+ * setting on /auth/register; this only lets the UI avoid showing a form the
+ * server would reject.
+ */
+export interface AuthConfigResponse {
+  registrationEnabled: boolean;
+}
+
+/**
  * Only the endpoints the backend actually implements are exposed here.
  * Phone OTP, social OAuth, and password-reset flows are not implemented
  * server-side, so no client methods are declared for them.
@@ -41,6 +52,19 @@ export interface RegisterRequest {
 export const AuthenticationService = {
   async login(request: LoginRequest): Promise<AuthResponse> {
     return httpClient.post<AuthResponse>('/auth/login', request);
+  },
+
+  /**
+   * Public capability snapshot. On any failure it fails open (returns
+   * registrationEnabled=true) so a transient config-fetch error never hides a
+   * working signup form; the backend still rejects the request if disabled.
+   */
+  async getConfig(): Promise<AuthConfigResponse> {
+    try {
+      return await httpClient.get<AuthConfigResponse>('/auth/config');
+    } catch {
+      return { registrationEnabled: true };
+    }
   },
 
   async register(request: RegisterRequest): Promise<AuthResponse> {

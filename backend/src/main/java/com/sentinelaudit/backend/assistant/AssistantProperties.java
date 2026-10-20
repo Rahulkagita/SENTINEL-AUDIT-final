@@ -44,7 +44,12 @@ public class AssistantProperties {
         private String apiKey = "";
         /** Blank = provider default (gpt-4o-mini, or GEMINI_MODEL / gemini-3.8-flash). */
         private String model = "";
-        private int timeoutSeconds = 30;
+        /**
+         * Read timeout for one model turn. Gemini 3.8 Flash has a documented
+         * ~13s time-to-first-token and a tool-using turn can exceed 60s, so a
+         * short timeout converts a slow-but-successful call into a 503.
+         */
+        private int timeoutSeconds = 120;
         private int maxOutputTokens = 900;
         private double temperature = 0.2;
     }
@@ -64,7 +69,11 @@ public class AssistantProperties {
         private String model = "";
         /** 0 = provider default (1536 OpenAI / 768 Gemini). */
         private int dimensions = 0;
-        private int timeoutSeconds = 30;
+        /**
+         * Read timeout for one embedding call. Batch embedding of a document
+         * can take far longer than a single query, so this is generous.
+         */
+        private int timeoutSeconds = 120;
     }
 
     @Data

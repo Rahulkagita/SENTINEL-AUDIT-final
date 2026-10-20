@@ -69,6 +69,7 @@ postgres://user:pass@host:5432/db  ->  jdbc:postgresql://host:5432/db
 | `PORT` | `8080` | HTTP port |
 | `JWT_EXPIRATION` | `86400000` | Access-token lifetime in **milliseconds** (default 24h) |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,https://sentinelauditfrontend.vercel.app` | Comma-separated browser origins allowed to call the API. Set this to your real frontend origin(s) in production |
+| `REGISTRATION_ENABLED` | `true` | Public self-service signup. Set `false` for a restricted demo: the backend then rejects `POST /api/auth/register` with `403` and `GET /api/auth/config` reports `registrationEnabled=false` so the UI hides the form. Existing-user login is unaffected. This is **not** tenant isolation — see "Limitations" |
 
 ## Minimal run
 
@@ -123,7 +124,7 @@ cd backend && ./gradlew bootRun
 | `ASSISTANT_LLM_PROVIDER` | *(auto)* | `openai` (OpenAI-compatible HTTP) or `gemini`. Auto = gemini when `GEMINI_API_KEY` is set, else openai |
 | `ASSISTANT_LLM_BASE_URL` | provider default | Any OpenAI-compatible endpoint |
 | `ASSISTANT_LLM_MODEL` | provider default (`gpt-4o-mini`, or `GEMINI_MODEL`/`gemini-3.8-flash` for Gemini) | |
-| `ASSISTANT_LLM_TIMEOUT_SECONDS` | `30` | |
+| `ASSISTANT_LLM_TIMEOUT_SECONDS` | `120` | Read timeout for one model turn. Gemini 3.8 Flash has a documented ~13s time-to-first-token and a tool-using turn can exceed 60s; a short timeout turns a slow-but-successful call into a `503` |
 | `ASSISTANT_LLM_MAX_OUTPUT_TOKENS` | `900` | |
 | `ASSISTANT_LLM_TEMPERATURE` | `0.2` | |
 | `ASSISTANT_EMBEDDING_PROVIDER` | *(auto: follows the chat provider)* | `openai`, `gemini`, or `local` = offline deterministic (lexical, non-semantic; dev/tests only) |
@@ -131,7 +132,7 @@ cd backend && ./gradlew bootRun
 | `ASSISTANT_EMBEDDING_BASE_URL` | provider default | |
 | `ASSISTANT_EMBEDDING_MODEL` | provider default (`text-embedding-3-small`, or `gemini-embedding-001`) | Changing this forces a re-embed |
 | `ASSISTANT_EMBEDDING_DIMENSIONS` | provider default (`1536` OpenAI / `768` Gemini) | |
-| `ASSISTANT_EMBEDDING_TIMEOUT_SECONDS` | `30` | |
+| `ASSISTANT_EMBEDDING_TIMEOUT_SECONDS` | `120` | Read timeout for one embedding call (a whole document is slower than a query) |
 
 All `ASSISTANT_*` variables act as explicit overrides and take precedence over
 the Gemini defaults when both are set. Vectors from different embedding
@@ -226,6 +227,8 @@ To inspect the schema Hibernate expects, see the entities under
 | `connection refused` on `localhost:5432` | PostgreSQL not running | Start PostgreSQL, or point `DATABASE_URL` at your host |
 | `database "sentinelaudit" does not exist` | Missing database | `createdb sentinelaudit` (or set `DATABASE_URL` to an existing DB) |
 | Assistant chat returns 503 "not configured" | No model key set | Set `GEMINI_API_KEY` (Gemini) or `ASSISTANT_LLM_API_KEY` (OpenAI-compatible) |
-| Assistant chat returns 503 "temporarily unavailable" | Provider error | Check the backend log for the HTTP status (401 = bad key, 429 = rate limit, timeout = network) |
+| Assistant chat returns 503 "temporarily unavailable" | Provider error (HTTP error, timeout, or empty response) | The 503 body now carries `data.code` and `data.reference`; the backend log line `Assistant 503 code=… ref=… cause=…` names the failure class. For a timeout (`ResourceAccessException`), raise `ASSISTANT_LLM_TIMEOUT_SECONDS` (Gemini 3.8 Flash can take 60s+ for a tool-using turn) |
+| Assistant answers every question with "not enough evidence" | Knowledge index is empty | Index once: set `ASSISTANT_INDEXING_ALLOW_API=true`, call `POST /api/assistant/reindex`, then set it back to `false`. Startup logs print `ASSISTANT_DIAG indexing …` when the index stays empty |
 | Gemini 400 `INVALID_ARGUMENT` on chat | Unsupported `GEMINI_MODEL` id | Use a currently supported chat model, e.g. `gemini-3.8-flash` |
+| `POST /api/auth/register` returns 403 | Registration disabled | Expected when `REGISTRATION_ENABLED=false`; set it to `true` to allow self-service signup |
 | `/api/assistant/reindex` returns 403 | Re-index API disabled | Set `ASSISTANT_INDEXING_ALLOW_API=true` (deliberate: any authenticated user may then re-index) |

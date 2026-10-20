@@ -1,5 +1,7 @@
 package com.sentinelaudit.backend.controller;
 
+import com.sentinelaudit.backend.config.FeatureFlags;
+import com.sentinelaudit.backend.dto.AuthConfigResponse;
 import com.sentinelaudit.backend.dto.AuthResponse;
 import com.sentinelaudit.backend.dto.LoginRequest;
 import com.sentinelaudit.backend.dto.RegisterRequest;
@@ -25,6 +27,19 @@ public class AuthController {
 
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private FeatureFlags featureFlags;
+
+    /**
+     * Public capability snapshot so the frontend knows whether to offer the
+     * signup form. Exposes only non-secret booleans - never a secret, and never
+     * whether any particular account exists.
+     */
+    @GetMapping("/config")
+    public ResponseEntity<AuthConfigResponse> config() {
+        return ResponseEntity.ok(new AuthConfigResponse(featureFlags.isRegistrationEnabled()));
+    }
 
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {

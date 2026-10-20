@@ -34,6 +34,7 @@ public class GlobalExceptionHandler {
     private static final String MSG_FORBIDDEN = "You do not have permission to perform this action.";
     private static final String MSG_NOT_FOUND = "The requested resource was not found.";
     private static final String MSG_CONFLICT = "The request conflicts with the current state.";
+    private static final String MSG_REGISTRATION_DISABLED = "Registration is disabled on this deployment.";
     private static final String MSG_UNSUPPORTED_METHOD = "The HTTP method is not supported for this endpoint.";
     private static final String MSG_SERVER_ERROR = "An unexpected error occurred.";
 
@@ -67,6 +68,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Object>> handleConflict(ConflictException ex) {
         log.warn("Conflict: {}", ex.getMessage());
         return body(HttpStatus.CONFLICT, MSG_CONFLICT);
+    }
+
+    /**
+     * Registration is turned off by configuration. The message names that one
+     * fact only (it is already public via GET /api/auth/config) - no internal
+     * detail and no hint about existing accounts.
+     */
+    @ExceptionHandler(RegistrationDisabledException.class)
+    public ResponseEntity<ApiResponse<Object>> handleRegistrationDisabled(RegistrationDisabledException ex) {
+        log.warn("Registration attempt rejected: {}", ex.getMessage());
+        return body(HttpStatus.FORBIDDEN, MSG_REGISTRATION_DISABLED);
     }
 
     // ---- Spring Security -------------------------------------------------

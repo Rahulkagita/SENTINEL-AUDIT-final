@@ -4,6 +4,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -105,8 +106,16 @@ public class GeminiLlmClient implements LlmClient {
             // Logs the HTTP status only - never the prompt, arguments or key.
             log.warn("Gemini call failed with HTTP {}", e.getStatusCode().value());
             throw new AssistantProviderException("Gemini request failed with status " + e.getStatusCode().value(), e);
+        } catch (ResourceAccessException e) {
+            // Read/connect timeout or transport error. This is the failure that
+            // surfaces as the generic 503: a slow model (Gemini 3.8 Flash has a
+            // documented ~13s time-to-first-token and can exceed 60s for a
+            // tool-using turn) aborts at assistant.llm.timeout-seconds. Logged
+            // with the timeout in the message so the cause is diagnosable
+            // without ever logging the prompt or the key.
+            log.warn("Gemini call timed out or was unreachable: {}", e.getClass().getSimpleName());
+            throw new AssistantProviderException("Gemini request timed out or was unreachable", e);
         } catch (Exception e) {
-            // Timeouts (ResourceAccessException) and transport errors land here.
             log.warn("Gemini call failed: {}", e.getClass().getSimpleName());
             throw new AssistantProviderException("Gemini request failed", e);
         }

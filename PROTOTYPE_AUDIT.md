@@ -209,7 +209,7 @@ Postgres (`:5432`), backend (`:8080`), and frontend (`:3000`) were already runni
 ## 7. Migrations & environment notes
 
 - **Database schema:** no migration required. The change set contains **no DDL and no new columns/tables**; `spring.jpa.hibernate.ddl-auto=update` remains unchanged and the refactor only removed frontend code and one config default.
-- **Configuration migration:** anyone relying on the baked-in `Rahul@4418` default must now export `DATABASE_PASSWORD` (empty default fails fast on connect). `JWT_SECRET` was already mandatory. Optional new var: `API_PROXY_TARGET` (frontend, default `http://localhost:8080`).
+- **Configuration migration:** anyone relying on the previously baked-in database-password default (redacted here; it also exists in Git history and must be rotated) must now export `DATABASE_PASSWORD` (empty default fails fast on connect). `JWT_SECRET` was already mandatory. Optional new var: `API_PROXY_TARGET` (frontend, default `http://localhost:8080`).
 - **Frontend env var:** `NEXT_PUBLIC_API_BASE_URL` is now optional (it was previously required to reach any backend at all).
 
 ## 8. File-change summary
@@ -447,3 +447,95 @@ cd ../frontend; npm run dev           # open http://localhost:3000/assistant
 6. **No admin/RBAC gating on `reindex`** — guarded by authentication + `ASSISTANT_INDEXING_ALLOW_API` because the app has no admin role; review before exposing publicly.
 7. **Browser-level checks not performed** — assistant UI states are covered by unit tests and a production build, not by manual click-through (§6 #12).
 8. All work remains **uncommitted**; nothing was committed or pushed.
+
+## 11. Assistant 503 diagnosis + restricted-demo registration (2026-10-20)
+
+This section records a live diagnosis of the "assistant is temporarily unavailable" 503 and a
+backend-enforced registration switch. The same constraints applied: no deploy, no push, no commit,
+no secret printed, no destructive DB operation.
+
+### 11.1 Exact cause of the 503 (evidence, not inference)
+
+Reproduced against the **running** backend with a real JWT and read-only DB probes:
+
+- `GET /api/assistant/status` returned
+  `configured=true, llmProvider=gemini, llmModel=gemini-3.8-flash, embeddingProvider=gemini,
+  embeddingModel=gemini-embedding-001@768, indexedChunks=0`.
+  So the failure is **not** "not configured" and **not** a missing or bad credential.
+- A direct, correctly-formatted Gemini `generateContent` call — same wire format the client uses
+  (`systemInstruction` + `contents` + `tools.functionDeclarations` + `generationConfig`,
+  `x-goog-api-key` header) — returned **HTTP 200** with `finishReason=STOP`. The model id and the
+  request format are valid.
+- That same call took **60–106 seconds** (≈60 s without tools, ≈106 s with the real tool
+  declarations); Gemini 3.8 Flash has a documented ~13 s time-to-first-token and is tuned to think
+  before answering.
+- The client read timeout was **30 s**, so the call aborted with
+  `ResourceAccessException` → the generic catch → `AssistantProviderException("Gemini request
+  failed")` → **503 "The assistant is temporarily unavailable. Please try again."**
+
+**Cause: a too-short read timeout on a slow-but-successful provider call.** The 503 text was
+accurate but undiagnosable; the request format, model and credentials were all fine.
+
+### 11.2 Fix (smallest correct change)
+
+- Raised the default provider read timeout `30 s → 120 s` (`assistant.llm.timeout-seconds` /
+  `ASSISTANT_LLM_TIMEOUT_SECONDS`, and the embedding timeout likewise), because a tool-using
+  Gemini turn can exceed 60 s.
+- `GeminiLlmClient` / `OpenAiLlmClient` now handle `ResourceAccessException` separately and log/throw
+  a **timeout-classified** message, so the cause is visible in logs. No fabricated answer, no change
+  to the client-facing 503 text.
+- `AssistantExceptionHandler` now also returns a machine-readable `data.code` and a random,
+  non-sensitive `data.reference`, and logs `Assistant 503 code=… ref=… cause=<root type>`. The
+  provider message, prompt, URL and key are still never logged or returned.
+- `AssistantStartup` now logs an explicit `ASSISTANT_DIAG …` line when startup indexing is enabled
+  yet produces **no chunks**, making an empty index visible.
+
+Verified by the added regression test
+`assistant.provider.GeminiLlmClientTest#readTimeoutBecomesATimeoutProviderExceptionNotAFabricatedAnswer`.
+
+### 11.3 Secondary issue — the knowledge index is empty
+
+The live DB has **0 rows** in `assistant_knowledge_chunks`. With an empty index, retrieval returns
+nothing (no embedding call is even made) and the assistant legitimately answers with its
+"insufficient evidence" refusal. This is separate from the 503. Indexing is intentionally off by
+default (`ASSISTANT_INDEXING_ALLOW_API=false`, `ASSISTANT_INDEX_ON_STARTUP=false`); build it once:
+
+1. Set `ASSISTANT_INDEXING_ALLOW_API=true`, restart.
+2. `POST /api/assistant/reindex` with a valid JWT.
+3. Set `ASSISTANT_INDEXING_ALLOW_API=false` again.
+
+### 11.4 Restricted-demo registration (backend-enforced)
+
+New setting **`registration.enabled`** (env **`REGISTRATION_ENABLED`**, default `true`):
+
+- Enforced in `UserService.register()` — a disabled deployment returns **403** with the message
+  "Registration is disabled on this deployment." even when the API is called directly (the frontend
+  form is not the security boundary).
+- `GET /api/auth/config` (public) returns `{ "registrationEnabled": <bool> }` so the UI hides the
+  signup form; the backend remains the source of truth.
+- **Existing-user login is unaffected.**
+- Local development keeps the default (`true`).
+- This is **not** tenant isolation and creates **no** hardcoded demo account or password.
+- Tests: `controller.RegistrationConfigurationTest` (disabled → 403 + no account + config false +
+  login still 401 for a missing user; enabled → 201 + real JWT + config true).
+
+### 11.5 Validation performed (2026-10-20)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend unit/integration tests | `.\gradlew.bat test` | **BUILD SUCCESSFUL — 110 tests, 0 failures, 0 errors** (was 104) |
+| Backend tests with a `GEMINI_API_KEY` in the env | `.\gradlew.bat test --rerun-tasks` | **BUILD SUCCESSFUL** (env-isolation still holds) |
+| Frontend lint | `npm run lint` | ✔ no warnings or errors |
+| Frontend types | `npx tsc --noEmit` | clean |
+| Frontend tests | `npm test` | **68 passed** |
+| Frontend production build | `npm run build` | ✔ compiled, 13/13 pages |
+
+### 11.6 Still not verified / blockers
+
+1. **Live Gemini answer quality** was not asserted — only that the call returns 200 and that a slow
+   call now survives the timeout. Retrieval quality with the real embedding model is unverified.
+2. **Live Postgres end-to-end after the fix** was not re-run on a rebuilt backend (the running
+   instance predates these edits); validation was via the test suite.
+3. The knowledge index must be built once (§11.3) or the assistant will keep saying "not enough
+   evidence".
+4. All work remains **uncommitted**; nothing was committed or pushed.

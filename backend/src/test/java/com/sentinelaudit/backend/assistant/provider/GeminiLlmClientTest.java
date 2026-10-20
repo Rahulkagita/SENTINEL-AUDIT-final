@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.client.match.MockRestRequestMatchers;
 import org.springframework.test.web.client.response.MockRestResponseCreators;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
@@ -272,6 +273,31 @@ class GeminiLlmClientTest {
         assertThatThrownBy(() -> client.complete(
                 List.of(msg("role", "user", "content", "hi")), List.of()))
                 .isInstanceOf(AssistantProviderException.class);
+    }
+
+    /**
+     * Regression: a slow-but-successful provider call aborts at the configured
+     * read timeout. That must surface as an honest, timeout-classified
+     * {@link AssistantProviderException} (which the API layer turns into a 503),
+     * never as a fabricated answer. This is the failure that produced the
+     * misleading "assistant is temporarily unavailable" message in production.
+     */
+    @Test
+    void readTimeoutBecomesATimeoutProviderExceptionNotAFabricatedAnswer() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer timeoutServer = MockRestServiceServer.bindTo(builder).build();
+        GeminiLlmClient timeoutClient = new GeminiLlmClient(
+                builder.baseUrl(BASE_URL).build(), "test-key", "gemini-test", 100, 0.2);
+
+        timeoutServer.expect(MockRestRequestMatchers.requestTo(GENERATE_URI))
+                .andRespond(request -> {
+                    throw new ResourceAccessException("read timed out");
+                });
+
+        assertThatThrownBy(() -> timeoutClient.complete(
+                List.of(msg("role", "user", "content", "hi")), List.of()))
+                .isInstanceOf(AssistantProviderException.class)
+                .hasMessageContaining("timed out");
     }
 
     @Test
