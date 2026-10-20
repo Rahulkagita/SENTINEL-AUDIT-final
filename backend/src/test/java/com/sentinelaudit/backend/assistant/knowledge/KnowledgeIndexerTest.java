@@ -70,6 +70,11 @@ class KnowledgeIndexerTest {
             }
 
             @Override
+            public String provider() {
+                return "test";
+            }
+
+            @Override
             public boolean isConfigured() {
                 return false;
             }

@@ -154,7 +154,7 @@ public class AssistantService {
 
         List<String> distinctTools = toolsUsed.stream().distinct().toList();
         return new AssistantChatResponse(answer, sources, distinctTools,
-                "openai-compatible", llmClient.model(), insufficient);
+                llmClient.provider(), llmClient.model(), insufficient);
     }
 
     public AssistantStatusResponse status() {
@@ -165,9 +165,9 @@ public class AssistantService {
         }
         return new AssistantStatusResponse(
                 llmClient.isConfigured() && embeddingProvider.isConfigured(),
-                "openai-compatible",
+                llmClient.provider(),
                 llmClient.model(),
-                properties.getEmbedding().getProvider(),
+                embeddingProvider.provider(),
                 embeddingProvider.model(),
                 chunks.size(),
                 List.copyOf(sources),

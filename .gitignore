@@ -6,6 +6,7 @@
 **/.env.*
 !**/.env.example
 frontend/.env.local
+backend/.env.local
 
 # Frontend generated files
 frontend/node_modules/

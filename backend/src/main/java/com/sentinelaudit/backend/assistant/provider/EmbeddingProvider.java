@@ -15,6 +15,9 @@ public interface EmbeddingProvider {
     /** Vector length produced by {@link #embed(String)}. */
     int dimensions();
 
+    /** Short provider label reported to clients (never a secret). */
+    String provider();
+
     /** True when the provider has everything it needs to be called. */
     boolean isConfigured();
 

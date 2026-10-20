@@ -15,6 +15,9 @@ public interface LlmClient {
     /** Chat model identifier. */
     String model();
 
+    /** Short provider label reported to clients (never a secret). */
+    String provider();
+
     /** True when the client has a key/base URL and can be called. */
     boolean isConfigured();
 

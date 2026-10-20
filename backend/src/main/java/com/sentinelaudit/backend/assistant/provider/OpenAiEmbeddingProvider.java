@@ -42,6 +42,11 @@ public class OpenAiEmbeddingProvider implements EmbeddingProvider {
     }
 
     @Override
+    public String provider() {
+        return "openai";
+    }
+
+    @Override
     public boolean isConfigured() {
         return apiKey != null && !apiKey.isBlank();
     }

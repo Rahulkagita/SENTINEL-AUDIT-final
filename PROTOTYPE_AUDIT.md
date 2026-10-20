@@ -109,7 +109,7 @@ Zero-based on the wire, one-based in the UI, translated exactly once in `fronten
 
 1. **Hardcoded database password removed (main finding).**
    `backend/src/main/resources/application.properties` line 9 was
-   `spring.datasource.password=${DATABASE_PASSWORD:Rahul@4418}` — a real-looking credential baked in as the default, contradicting `README-ENVIRONMENT.md` ("No default — must be set").
+   `spring.datasource.password=${DATABASE_PASSWORD:<redacted>}` — a real-looking credential baked in as the default, contradicting `README-ENVIRONMENT.md` ("No default — must be set"). (The literal value is intentionally not reproduced here; it was removed from the repository and should be treated as compromised — rotate it anywhere it was ever used.)
    Now: `spring.datasource.password=${DATABASE_PASSWORD:}` (empty default → connection fails fast unless the env var is provided). Test runs are unaffected: `src/test/resources/application.properties` overrides the datasource with in-memory H2.
 2. **JWT posture verified (no change needed):** stateless HS256 with fail-fast `JWT_SECRET` requirement, BCrypt password hashing, `/api/auth/login`, `/api/auth/register`, `/api/health` public, JSON 401/403 bodies (not HTML redirects) for everything else, CORS restricted to the two known frontends. Regression-tested (§5).
 3. **Header hygiene:** removed the non-functional `X-Workspace-Id` header; requests now carry only `Content-Type`, `Accept`, and the `Authorization: Bearer` JWT.

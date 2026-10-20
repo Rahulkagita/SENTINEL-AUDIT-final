@@ -13,7 +13,8 @@ import java.util.Locale;
  * paraphrase, and the assistant must not present it as a language model.</p>
  *
  * <p>It is only active when {@code assistant.embedding.provider=local}; the
- * default provider is {@code openai}.</p>
+ * default provider is OpenAI-compatible HTTP (or Gemini when a
+ * {@code GEMINI_API_KEY} is present).</p>
  */
 public class LocalHashEmbeddingProvider implements EmbeddingProvider {
 
@@ -27,6 +28,11 @@ public class LocalHashEmbeddingProvider implements EmbeddingProvider {
     @Override
     public int dimensions() {
         return VECTOR_SIZE;
+    }
+
+    @Override
+    public String provider() {
+        return "local";
     }
 
     @Override

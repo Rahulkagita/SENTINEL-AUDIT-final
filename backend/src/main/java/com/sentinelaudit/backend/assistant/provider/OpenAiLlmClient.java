@@ -41,6 +41,11 @@ public class OpenAiLlmClient implements LlmClient {
     }
 
     @Override
+    public String provider() {
+        return "openai-compatible";
+    }
+
+    @Override
     public boolean isConfigured() {
         return apiKey != null && !apiKey.isBlank();
     }

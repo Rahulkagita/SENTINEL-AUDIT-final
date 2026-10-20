@@ -33,12 +33,17 @@ public class AssistantProperties {
 
     @Data
     public static class Llm {
-        /** Provider identifier. Only "openai" (OpenAI-compatible HTTP) is implemented. */
-        private String provider = "openai";
-        private String baseUrl = "https://api.openai.com/v1";
-        /** Read from ASSISTANT_LLM_API_KEY. Empty = not configured. */
+        /**
+         * Provider identifier: "openai" (OpenAI-compatible HTTP) or "gemini"
+         * (native Gemini API). Blank = auto: gemini when GEMINI_API_KEY is set.
+         */
+        private String provider = "";
+        /** Blank = provider default (api.openai.com or generativelanguage.googleapis.com). */
+        private String baseUrl = "";
+        /** Read from ASSISTANT_LLM_API_KEY / GEMINI_API_KEY. Empty = not configured. */
         private String apiKey = "";
-        private String model = "gpt-4o-mini";
+        /** Blank = provider default (gpt-4o-mini, or GEMINI_MODEL / gemini-3.8-flash). */
+        private String model = "";
         private int timeoutSeconds = 30;
         private int maxOutputTokens = 900;
         private double temperature = 0.2;
@@ -46,14 +51,19 @@ public class AssistantProperties {
 
     @Data
     public static class Embedding {
-        /** "openai" (default) or "local" (deterministic lexical fallback for tests/dev). */
-        private String provider = "openai";
-        private String baseUrl = "https://api.openai.com/v1";
-        /** Read from ASSISTANT_EMBEDDING_API_KEY (falls back to the LLM key). */
+        /**
+         * "openai", "gemini" or "local" (deterministic lexical fallback for
+         * tests/dev). Blank = follow the chat provider.
+         */
+        private String provider = "";
+        /** Blank = provider default. */
+        private String baseUrl = "";
+        /** Read from ASSISTANT_EMBEDDING_API_KEY (falls back to the chat key). */
         private String apiKey = "";
-        private String model = "text-embedding-3-small";
-        /** Advisory: forwarded to providers that support a dimensions request. */
-        private int dimensions = 1536;
+        /** Blank = provider default; changing this forces a re-embed. */
+        private String model = "";
+        /** 0 = provider default (1536 OpenAI / 768 Gemini). */
+        private int dimensions = 0;
         private int timeoutSeconds = 30;
     }
 
@@ -80,8 +90,12 @@ public class AssistantProperties {
 
     @Data
     public static class Indexing {
-        /** Whether the reindex endpoint is available (still authentication-protected). */
-        private boolean allowApi = true;
+        /**
+         * Whether the reindex endpoint is available. Off by default for
+         * deployment: this app has no admin role, so re-indexing via the API is
+         * an explicitly-enabled, any-authenticated-user capability.
+         */
+        private boolean allowApi = false;
         /** Index approved documentation once at startup. Off by default. */
         private boolean onStartup = false;
         /**

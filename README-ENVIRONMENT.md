@@ -68,6 +68,7 @@ postgres://user:pass@host:5432/db  ->  jdbc:postgresql://host:5432/db
 |---|---|---|
 | `PORT` | `8080` | HTTP port |
 | `JWT_EXPIRATION` | `86400000` | Access-token lifetime in **milliseconds** (default 24h) |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,https://sentinelauditfrontend.vercel.app` | Comma-separated browser origins allowed to call the API. Set this to your real frontend origin(s) in production |
 
 ## Minimal run
 
@@ -93,24 +94,49 @@ All assistant settings are read from environment variables and are
 
 ### Enabling the assistant
 
-At minimum, set a model key (and, unless you opt into local embeddings, an
-embedding key). The embedding key falls back to the LLM key.
+At minimum, set a model key. **Two backends are supported** — pick either one:
+
+**Option A — Gemini (simplest: one key for chat and embeddings)**
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ASSISTANT_LLM_API_KEY` | *(empty)* | **Required to enable answering** |
-| `ASSISTANT_LLM_PROVIDER` | `openai` | OpenAI-compatible HTTP |
-| `ASSISTANT_LLM_BASE_URL` | `https://api.openai.com/v1` | Any compatible endpoint |
-| `ASSISTANT_LLM_MODEL` | `gpt-4o-mini` | |
+| `GEMINI_API_KEY` | *(empty)* | **Required to enable answering.** From https://aistudio.google.com/apikey. Backend-only; never expose via `NEXT_PUBLIC_*` |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Any currently supported Gemini chat model id |
+
+When `GEMINI_API_KEY` is present and no provider is explicitly set, both chat
+and embeddings use Google's native Gemini API
+(`generativelanguage.googleapis.com/v1beta`, key in the `x-goog-api-key`
+header). Embeddings default to `gemini-embedding-001` at **768 dimensions** —
+a Gemini chat key is never sent to OpenAI's embedding endpoint.
+
+```bash
+export GEMINI_API_KEY="<your key>"
+export GEMINI_MODEL="gemini-3.8-flash"   # optional; this is the default
+cd backend && ./gradlew bootRun
+```
+
+**Option B — OpenAI-compatible HTTP (or any compatible endpoint)**
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ASSISTANT_LLM_API_KEY` | *(empty)* | **Required to enable answering** (e.g. `sk-...`) |
+| `ASSISTANT_LLM_PROVIDER` | *(auto)* | `openai` (OpenAI-compatible HTTP) or `gemini`. Auto = gemini when `GEMINI_API_KEY` is set, else openai |
+| `ASSISTANT_LLM_BASE_URL` | provider default | Any OpenAI-compatible endpoint |
+| `ASSISTANT_LLM_MODEL` | provider default (`gpt-4o-mini`, or `GEMINI_MODEL`/`gemini-3.8-flash` for Gemini) | |
 | `ASSISTANT_LLM_TIMEOUT_SECONDS` | `30` | |
 | `ASSISTANT_LLM_MAX_OUTPUT_TOKENS` | `900` | |
 | `ASSISTANT_LLM_TEMPERATURE` | `0.2` | |
-| `ASSISTANT_EMBEDDING_PROVIDER` | `openai` | `local` = offline deterministic (lexical, non-semantic; dev/tests only) |
-| `ASSISTANT_EMBEDDING_API_KEY` | *falls back to `ASSISTANT_LLM_API_KEY`* | |
-| `ASSISTANT_EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | |
-| `ASSISTANT_EMBEDDING_MODEL` | `text-embedding-3-small` | Changing this forces a re-embed |
-| `ASSISTANT_EMBEDDING_DIMENSIONS` | `1536` | |
+| `ASSISTANT_EMBEDDING_PROVIDER` | *(auto: follows the chat provider)* | `openai`, `gemini`, or `local` = offline deterministic (lexical, non-semantic; dev/tests only) |
+| `ASSISTANT_EMBEDDING_API_KEY` | *falls back to the chat key* | |
+| `ASSISTANT_EMBEDDING_BASE_URL` | provider default | |
+| `ASSISTANT_EMBEDDING_MODEL` | provider default (`text-embedding-3-small`, or `gemini-embedding-001`) | Changing this forces a re-embed |
+| `ASSISTANT_EMBEDDING_DIMENSIONS` | provider default (`1536` OpenAI / `768` Gemini) | |
 | `ASSISTANT_EMBEDDING_TIMEOUT_SECONDS` | `30` | |
+
+All `ASSISTANT_*` variables act as explicit overrides and take precedence over
+the Gemini defaults when both are set. Vectors from different embedding
+models/dimensions are never compared: switching providers re-embeds the corpus
+on the next re-index.
 
 ### Retrieval, limits and indexing
 
@@ -124,7 +150,7 @@ embedding key). The embedding key falls back to the LLM key.
 | `ASSISTANT_CHAT_MAX_HISTORY_CHARS` | `8000` | |
 | `ASSISTANT_CHAT_MAX_TOOL_ITERATIONS` | `3` | Bounds the function-calling loop |
 | `ASSISTANT_CHAT_MAX_TOOL_RESULT_CHARS` | `6000` | |
-| `ASSISTANT_INDEXING_ALLOW_API` | `true` | Allows `POST /api/assistant/reindex` (still JWT-required) |
+| `ASSISTANT_INDEXING_ALLOW_API` | `false` | Enables `POST /api/assistant/reindex` for **any authenticated user** (there is no admin role). Set to `true` deliberately, e.g. during initial setup |
 | `ASSISTANT_INDEX_ON_STARTUP` | `false` | Best-effort index at boot |
 | `ASSISTANT_KNOWLEDGE_ROOT` | *(empty)* | Optional filesystem corpus root |
 | `ASSISTANT_KNOWLEDGE_DOCS` | `PROTOTYPE_AUDIT.md,README-ENVIRONMENT.md` | Files under the root, applied only when the root is set |
@@ -140,14 +166,20 @@ documented scale-up path for large corpora, but it is not assumed here.
 
 ### Indexing
 
-Index the curated docs (idempotent — safe to repeat) after any docs change:
+Index the curated docs (idempotent — safe to repeat) after any docs change.
+The re-index API is **disabled by default**; enable it with
+`ASSISTANT_INDEXING_ALLOW_API=true` (it stays JWT-protected — this app has no
+admin role, so treat enabling it as granting re-index access to every
+authenticated user), or set `ASSISTANT_INDEX_ON_STARTUP=true` to build the
+index at boot:
 
 ```bash
 # <jwt> = access token from POST /api/auth/login
 curl -X POST http://localhost:8080/api/assistant/reindex -H "Authorization: Bearer <jwt>"
 ```
 
-Or set `ASSISTANT_INDEX_ON_STARTUP=true` to build it at boot.
+Switching embedding provider/model/dimensions (e.g. from OpenAI to Gemini)
+requires one re-index; the next run re-embeds every chunk automatically.
 
 ### What gets indexed
 
@@ -169,7 +201,9 @@ curl http://localhost:8080/api/assistant/status -H "Authorization: Bearer <jwt>"
 ```
 
 `configured: true` + a non-zero `indexedChunks` means the assistant is ready.
-With no key configured, `/api/assistant/chat` returns `503` and the UI shows a
+The payload also reports `llmProvider` (`gemini` or `openai-compatible`) and
+`embeddingProvider` — verify they match what you configured. With no key
+configured, `/api/assistant/chat` returns `503` and the UI shows a
 "not configured" banner — it will not fabricate an answer.
 
 ## Schema management
@@ -191,3 +225,7 @@ To inspect the schema Hibernate expects, see the entities under
 | `password authentication failed for user "postgres"` | Wrong DB password | Set `DATABASE_PASSWORD` to your real password |
 | `connection refused` on `localhost:5432` | PostgreSQL not running | Start PostgreSQL, or point `DATABASE_URL` at your host |
 | `database "sentinelaudit" does not exist` | Missing database | `createdb sentinelaudit` (or set `DATABASE_URL` to an existing DB) |
+| Assistant chat returns 503 "not configured" | No model key set | Set `GEMINI_API_KEY` (Gemini) or `ASSISTANT_LLM_API_KEY` (OpenAI-compatible) |
+| Assistant chat returns 503 "temporarily unavailable" | Provider error | Check the backend log for the HTTP status (401 = bad key, 429 = rate limit, timeout = network) |
+| Gemini 400 `INVALID_ARGUMENT` on chat | Unsupported `GEMINI_MODEL` id | Use a currently supported chat model, e.g. `gemini-3.8-flash` |
+| `/api/assistant/reindex` returns 403 | Re-index API disabled | Set `ASSISTANT_INDEXING_ALLOW_API=true` (deliberate: any authenticated user may then re-index) |
